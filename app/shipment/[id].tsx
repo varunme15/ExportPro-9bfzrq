@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -9,16 +9,15 @@ import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
-import { SHIPMENT_STATUS } from '../../constants/config';
 
 export default function ShipmentDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams();
-  const { shipments, boxTypes, products, invoices, suppliers, updateShipment, deleteShipment, removeBoxFromShipment, getBoxTypeById, getProductById, getCustomerById, getSupplierById, userSettings } = useApp();
+  const { shipments, products, invoices, deleteShipment, removeBoxFromShipment, getBoxTypeById, getProductById, getCustomerById, getSupplierById, userSettings } = useApp();
 
   const shipment = shipments.find(s => s.id === id);
-  const customer = shipment?.customerId ? getCustomerById(shipment.customerId) : null;
+  const customer = shipment?.customer_id ? getCustomerById(shipment.customer_id) : null;
   
   if (!shipment) {
     return (
@@ -28,35 +27,39 @@ export default function ShipmentDetailScreen() {
     );
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case SHIPMENT_STATUS.DRAFT: return theme.textSecondary;
-      case SHIPMENT_STATUS.PACKING: return theme.warning;
-      case SHIPMENT_STATUS.READY: return theme.success;
-      case SHIPMENT_STATUS.SHIPPED: return theme.primary;
-      default: return theme.textSecondary;
-    }
+  const getShipmentStatusText = () => {
+    const boxCount = shipment.boxes?.length || 0;
+    if (boxCount === 0) return 'Draft';
+    return `${boxCount} Box${boxCount !== 1 ? 'es' : ''}`;
+  };
+
+  const getShipmentStatusColor = () => {
+    const boxCount = shipment.boxes?.length || 0;
+    if (boxCount === 0) return theme.textSecondary;
+    return theme.success;
   };
 
   const calculateStats = () => {
     let totalWeight = 0;
     let totalCBM = 0;
     let totalItems = 0;
-    let totalNetWeight = 0;
 
     shipment.boxes.forEach(box => {
-      totalWeight += box.grossWeight;
-      totalNetWeight += box.netWeight;
-      const boxType = getBoxTypeById(box.boxTypeId);
+      totalWeight += box.weight || 0;
+      const boxType = getBoxTypeById(box.box_type_id);
       if (boxType) {
-        totalCBM += (boxType.length * boxType.width * boxType.height) / 1000000;
+        // Parse dimensions string (e.g., "60x45x40") to calculate CBM
+        const dims = boxType.dimensions.split('x').map(Number);
+        if (dims.length === 3) {
+          totalCBM += (dims[0] * dims[1] * dims[2]) / 1000000;
+        }
       }
       box.products.forEach(p => {
         totalItems += p.quantity;
       });
     });
 
-    return { totalWeight, totalNetWeight, totalCBM, totalItems };
+    return { totalWeight, totalCBM, totalItems };
   };
 
   const stats = calculateStats();
@@ -66,40 +69,44 @@ export default function ShipmentDetailScreen() {
     const invoiceMap = new Map<string, {
       invoice: any;
       supplier: any;
-      products: Array<{ product: any; quantity: number }>;
+      products: Array<{ product: any; quantity: number; rate: number }>;
     }>();
 
     // Iterate through all boxes and products
     shipment.boxes.forEach(box => {
       box.products.forEach(boxProduct => {
-        const product = getProductById(boxProduct.productId);
-        if (product) {
-          const invoiceId = product.invoiceId;
-          const invoice = invoices.find(inv => inv.id === invoiceId);
-          const supplier = invoice ? getSupplierById(invoice.supplierId) : null;
+        const product = getProductById(boxProduct.product_id);
+        if (product && product.invoices && product.invoices.length > 0) {
+          // Get all invoices linked to this product
+          product.invoices.forEach(productInvoice => {
+            const invoiceId = productInvoice.invoice_id;
+            const invoice = invoices.find(inv => inv.id === invoiceId);
+            const supplier = invoice ? getSupplierById(invoice.supplier_id) : null;
 
-          if (invoice && supplier) {
-            if (!invoiceMap.has(invoiceId)) {
-              invoiceMap.set(invoiceId, {
-                invoice,
-                supplier,
-                products: []
-              });
+            if (invoice && supplier) {
+              if (!invoiceMap.has(invoiceId)) {
+                invoiceMap.set(invoiceId, {
+                  invoice,
+                  supplier,
+                  products: []
+                });
+              }
+
+              const existing = invoiceMap.get(invoiceId)!.products.find(
+                p => p.product.id === product.id
+              );
+
+              if (existing) {
+                existing.quantity += boxProduct.quantity;
+              } else {
+                invoiceMap.get(invoiceId)!.products.push({
+                  product,
+                  quantity: boxProduct.quantity,
+                  rate: productInvoice.rate
+                });
+              }
             }
-
-            const existing = invoiceMap.get(invoiceId)!.products.find(
-              p => p.product.id === product.id
-            );
-
-            if (existing) {
-              existing.quantity += boxProduct.quantity;
-            } else {
-              invoiceMap.get(invoiceId)!.products.push({
-                product,
-                quantity: boxProduct.quantity
-              });
-            }
-          }
+          });
         }
       });
     });
@@ -127,7 +134,7 @@ export default function ShipmentDetailScreen() {
         [''],
         ['Shipment Name:', shipment.name],
         ['Destination:', shipment.destination],
-        ['Lot Number:', shipment.lotNumber || 'N/A'],
+        ['Lot Number:', shipment.lot_number || 'N/A'],
         ['Export Date:', new Date().toLocaleDateString()],
         [''],
         ['Summary Statistics'],
@@ -141,21 +148,20 @@ export default function ShipmentDetailScreen() {
 
       // Create a sheet for each invoice
       shipmentInvoices.forEach(({ invoice, supplier, products: invoiceProducts }, index) => {
+        const currency = userSettings.currency || 'USD';
         const sheetData = [
-          [`Invoice #${invoice.invoiceNumber}`],
+          [`Invoice #${invoice.invoice_number}`],
           [''],
           ['Supplier Information'],
           ['Supplier Name:', supplier.name],
-          ['Country:', supplier.country],
-          ['Contact:', supplier.contactPerson],
-          ['Email:', supplier.email],
-          ['Phone:', supplier.phone],
+          ['Contact:', supplier.contact || 'N/A'],
+          ['Email:', supplier.email || 'N/A'],
+          ['Phone:', supplier.phone || 'N/A'],
           [''],
           ['Invoice Details'],
-          ['Invoice Number:', invoice.invoiceNumber],
+          ['Invoice Number:', invoice.invoice_number],
           ['Date:', invoice.date],
-          ['Total Amount:', `${invoice.currency} ${invoice.totalAmount.toLocaleString()}`],
-          ['Currency:', invoice.currency],
+          ['Total Amount:', `${currency} ${(invoice.amount || 0).toLocaleString()}`],
           [''],
           ['Products in Shipment'],
           ['#', 'Product Name', 'HS Code', 'Quantity', 'Unit', 'Rate', 'Total Value'],
@@ -163,24 +169,24 @@ export default function ShipmentDetailScreen() {
 
         // Add product rows
         invoiceProducts.forEach((item, idx) => {
-          const totalValue = item.quantity * item.product.rate;
+          const totalValue = item.quantity * item.rate;
           sheetData.push([
             idx + 1,
             item.product.name,
-            item.product.hsCode || 'N/A',
+            item.product.hs_code || 'N/A',
             item.quantity,
             item.product.unit,
-            `${invoice.currency} ${item.product.rate.toFixed(2)}`,
-            `${invoice.currency} ${totalValue.toFixed(2)}`
+            `${currency} ${item.rate.toFixed(2)}`,
+            `${currency} ${totalValue.toFixed(2)}`
           ]);
         });
 
         // Add totals
         const totalQty = invoiceProducts.reduce((sum, p) => sum + p.quantity, 0);
-        const totalValue = invoiceProducts.reduce((sum, p) => sum + (p.quantity * p.product.rate), 0);
+        const totalValue = invoiceProducts.reduce((sum, p) => sum + (p.quantity * p.rate), 0);
         sheetData.push(
           [''],
-          ['', '', '', totalQty, '', '', `${invoice.currency} ${totalValue.toFixed(2)}`]
+          ['', '', '', totalQty, '', '', `${currency} ${totalValue.toFixed(2)}`]
         );
 
         const ws = XLSX.utils.aoa_to_sheet(sheetData);
@@ -213,10 +219,10 @@ export default function ShipmentDetailScreen() {
         invoiceProducts.forEach(item => {
           allProductsData.push([
             item.product.name,
-            item.product.hsCode || 'N/A',
+            item.product.hs_code || 'N/A',
             item.quantity,
             item.product.unit,
-            invoice.invoiceNumber,
+            invoice.invoice_number,
             supplier.name
           ]);
         });
@@ -276,6 +282,7 @@ export default function ShipmentDetailScreen() {
     }
 
     try {
+      const currency = userSettings.currency || 'USD';
       const html = `
         <!DOCTYPE html>
         <html>
@@ -311,7 +318,7 @@ export default function ShipmentDetailScreen() {
               <div class="shipment-info">
                 <strong>Shipment:</strong> ${shipment.name} | 
                 <strong>Destination:</strong> ${shipment.destination} | 
-                ${shipment.lotNumber ? `<strong>Lot:</strong> ${shipment.lotNumber} | ` : ''}
+                ${shipment.lot_number ? `<strong>Lot:</strong> ${shipment.lot_number} | ` : ''}
                 <strong>Date:</strong> ${new Date().toLocaleDateString()}
               </div>
             </div>
@@ -322,16 +329,13 @@ export default function ShipmentDetailScreen() {
                   <div class="supplier-name">📦 ${supplier.name}</div>
                   <div class="invoice-details">
                     <div class="detail-item">
-                      <span class="detail-label">Invoice #:</span> ${invoice.invoiceNumber}
+                      <span class="detail-label">Invoice #:</span> ${invoice.invoice_number}
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Date:</span> ${invoice.date}
                     </div>
                     <div class="detail-item">
-                      <span class="detail-label">Total Amount:</span> ${invoice.currency} ${invoice.totalAmount.toLocaleString()}
-                    </div>
-                    <div class="detail-item">
-                      <span class="detail-label">Country:</span> ${supplier.country}
+                      <span class="detail-label">Total Amount:</span> ${currency} ${(invoice.amount || 0).toLocaleString()}
                     </div>
                   </div>
                 </div>
@@ -352,10 +356,10 @@ export default function ShipmentDetailScreen() {
                       <tr>
                         <td>${idx + 1}</td>
                         <td>${item.product.name}</td>
-                        <td>${item.product.hsCode || 'N/A'}</td>
+                        <td>${item.product.hs_code || 'N/A'}</td>
                         <td><strong>${item.quantity}</strong></td>
                         <td>${item.product.unit}</td>
-                        <td>${invoice.currency} ${item.product.rate.toFixed(2)}</td>
+                        <td>${currency} ${item.rate.toFixed(2)}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -392,7 +396,8 @@ export default function ShipmentDetailScreen() {
     }
   };
 
-  const generateLabelHTML = (shipment: any, box: any, customer: any, boxType: any, userSettings: any) => {
+  const generateLabelHTML = (shipmentData: any, box: any, customerData: any, boxType: any, settings: any) => {
+    const dimensions = boxType?.dimensions || 'N/A';
     return `
       <!DOCTYPE html>
       <html>
@@ -427,25 +432,25 @@ export default function ShipmentDetailScreen() {
             <div class="number-section">
               <div class="number-box">
                 <div class="number-label">LOT NUMBER</div>
-                <div class="number-value">${shipment.lotNumber || 'N/A'}</div>
+                <div class="number-value">${shipmentData.lot_number || 'N/A'}</div>
               </div>
               <div class="number-box">
                 <div class="number-label">BOX NUMBER</div>
-                <div class="number-value">#${box.boxNumber}</div>
+                <div class="number-value">#${box.box_number}</div>
               </div>
             </div>
             <div class="party">
               <div class="party-title">📤 CONSIGNOR (FROM)</div>
-              <div class="party-name">${userSettings.name}</div>
-              <div class="party-address">${userSettings.address}</div>
-              <div class="party-address">${[userSettings.city, userSettings.state, userSettings.country].filter(Boolean).join(', ')}</div>
+              <div class="party-name">${settings.name || 'N/A'}</div>
+              <div class="party-address">${settings.address || ''}</div>
+              <div class="party-address">${[settings.city, settings.state, settings.country].filter(Boolean).join(', ')}</div>
             </div>
             <div class="party">
               <div class="party-title">📥 CONSIGNEE (TO)</div>
-              <div class="party-name">${customer ? customer.name : shipment.destination}</div>
-              ${customer ? `
-                <div class="party-address">${customer.address}</div>
-                <div class="party-address">${[customer.city, customer.state, customer.country].filter(Boolean).join(', ')}</div>
+              <div class="party-name">${customerData ? customerData.name : shipmentData.destination}</div>
+              ${customerData ? `
+                <div class="party-address">${customerData.address || ''}</div>
+                <div class="party-address">${[customerData.city, customerData.state, customerData.country].filter(Boolean).join(', ')}</div>
               ` : ''}
             </div>
             <div class="details">
@@ -455,15 +460,11 @@ export default function ShipmentDetailScreen() {
               </div>
               <div class="detail-row">
                 <span class="detail-label">Dimensions:</span>
-                <span class="detail-value">${boxType ? `${boxType.length}×${boxType.width}×${boxType.height} cm` : 'N/A'}</span>
+                <span class="detail-value">${dimensions}</span>
               </div>
               <div class="detail-row">
-                <span class="detail-label">Net Weight:</span>
-                <span class="detail-value">${box.netWeight.toFixed(2)} kg</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Gross Weight:</span>
-                <span class="detail-value">${box.grossWeight.toFixed(2)} kg</span>
+                <span class="detail-label">Weight:</span>
+                <span class="detail-value">${(box.weight || 0).toFixed(2)} kg</span>
               </div>
             </div>
           </div>
@@ -480,7 +481,7 @@ export default function ShipmentDetailScreen() {
 
     try {
       let allLabelsHTML = shipment.boxes.map(box => {
-        const boxType = getBoxTypeById(box.boxTypeId);
+        const boxType = getBoxTypeById(box.box_type_id);
         return generateLabelHTML(shipment, box, customer, boxType, userSettings).replace('<!DOCTYPE html>', '').replace('<html>', '').replace('</html>', '').replace('<head>', '').replace('</head>', '').replace('<body>', '').replace('</body>', '');
       }).join('');
 
@@ -524,10 +525,6 @@ export default function ShipmentDetailScreen() {
     }
   };
 
-  const handleStatusChange = (newStatus: string) => {
-    updateShipment(shipment.id, { status: newStatus });
-  };
-
   const handleDeleteBox = (boxId: string) => {
     Alert.alert(
       'Remove Box',
@@ -561,6 +558,9 @@ export default function ShipmentDetailScreen() {
     );
   };
 
+  const statusText = getShipmentStatusText();
+  const statusColor = getShipmentStatusColor();
+
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
       {/* Header */}
@@ -584,10 +584,10 @@ export default function ShipmentDetailScreen() {
           <View style={styles.infoHeader}>
             <View style={{ flex: 1 }}>
               <Text style={styles.shipmentName}>{shipment.name}</Text>
-              {shipment.lotNumber && (
+              {shipment.lot_number && (
                 <View style={styles.lotRow}>
                   <MaterialIcons name="tag" size={14} color={theme.primary} />
-                  <Text style={styles.lotText}>Lot: {shipment.lotNumber}</Text>
+                  <Text style={styles.lotText}>Lot: {shipment.lot_number}</Text>
                 </View>
               )}
               <View style={styles.destRow}>
@@ -605,42 +605,11 @@ export default function ShipmentDetailScreen() {
                 </Pressable>
               )}
             </View>
-            <View style={[styles.statusBadge, { backgroundColor: `${getStatusColor(shipment.status)}15` }]}>
-              <Text style={[styles.statusText, { color: getStatusColor(shipment.status) }]}>
-                {shipment.status.toUpperCase()}
+            <View style={[styles.statusBadge, { backgroundColor: `${statusColor}15` }]}>
+              <Text style={[styles.statusText, { color: statusColor }]}>
+                {statusText.toUpperCase()}
               </Text>
             </View>
-          </View>
-
-          {/* Status Actions */}
-          <View style={styles.statusActions}>
-            {shipment.status === SHIPMENT_STATUS.DRAFT && (
-              <Pressable 
-                style={[styles.statusBtn, { backgroundColor: theme.warning }]}
-                onPress={() => handleStatusChange(SHIPMENT_STATUS.PACKING)}
-              >
-                <MaterialIcons name="inventory-2" size={18} color="#FFF" />
-                <Text style={styles.statusBtnText}>Start Packing</Text>
-              </Pressable>
-            )}
-            {shipment.status === SHIPMENT_STATUS.PACKING && (
-              <Pressable 
-                style={[styles.statusBtn, { backgroundColor: theme.success }]}
-                onPress={() => handleStatusChange(SHIPMENT_STATUS.READY)}
-              >
-                <MaterialIcons name="check-circle" size={18} color="#FFF" />
-                <Text style={styles.statusBtnText}>Mark Ready</Text>
-              </Pressable>
-            )}
-            {shipment.status === SHIPMENT_STATUS.READY && (
-              <Pressable 
-                style={[styles.statusBtn, { backgroundColor: theme.primary }]}
-                onPress={() => handleStatusChange(SHIPMENT_STATUS.SHIPPED)}
-              >
-                <MaterialIcons name="local-shipping" size={18} color="#FFF" />
-                <Text style={styles.statusBtnText}>Mark Shipped</Text>
-              </Pressable>
-            )}
           </View>
         </View>
 
@@ -664,7 +633,7 @@ export default function ShipmentDetailScreen() {
           <View style={styles.statCard}>
             <MaterialIcons name="fitness-center" size={24} color={theme.supplier} />
             <Text style={styles.statValue}>{stats.totalWeight.toFixed(1)}</Text>
-            <Text style={styles.statLabel}>kg Gross</Text>
+            <Text style={styles.statLabel}>kg</Text>
           </View>
         </View>
 
@@ -695,7 +664,7 @@ export default function ShipmentDetailScreen() {
             </View>
           ) : (
             shipment.boxes.map(box => {
-              const boxType = getBoxTypeById(box.boxTypeId);
+              const boxType = getBoxTypeById(box.box_type_id);
               return (
                 <Pressable 
                   key={box.id} 
@@ -704,12 +673,12 @@ export default function ShipmentDetailScreen() {
                 >
                   <View style={styles.boxHeader}>
                     <View style={styles.boxNumber}>
-                      <Text style={styles.boxNumberText}>#{box.boxNumber}</Text>
+                      <Text style={styles.boxNumberText}>#{box.box_number}</Text>
                     </View>
                     <View style={styles.boxInfo}>
                       <Text style={styles.boxType}>{boxType?.name || 'Unknown'}</Text>
                       <Text style={styles.boxDimensions}>
-                        {boxType ? `${boxType.length}×${boxType.width}×${boxType.height} cm` : ''}
+                        {boxType?.dimensions || 'N/A'}
                       </Text>
                     </View>
                     <Pressable 
@@ -726,12 +695,8 @@ export default function ShipmentDetailScreen() {
                       <Text style={styles.boxStatLabel}>Products</Text>
                     </View>
                     <View style={styles.boxStatItem}>
-                      <Text style={styles.boxStatValue}>{box.netWeight.toFixed(1)}</Text>
-                      <Text style={styles.boxStatLabel}>Net kg</Text>
-                    </View>
-                    <View style={styles.boxStatItem}>
-                      <Text style={styles.boxStatValue}>{box.grossWeight.toFixed(1)}</Text>
-                      <Text style={styles.boxStatLabel}>Gross kg</Text>
+                      <Text style={styles.boxStatValue}>{(box.weight || 0).toFixed(1)}</Text>
+                      <Text style={styles.boxStatLabel}>kg</Text>
                     </View>
                     <View style={styles.boxStatItem}>
                       <Text style={styles.boxStatValue}>
@@ -744,7 +709,7 @@ export default function ShipmentDetailScreen() {
                   {box.products.length > 0 && (
                     <View style={styles.boxProducts}>
                       {box.products.slice(0, 3).map((bp, idx) => {
-                        const product = getProductById(bp.productId);
+                        const product = getProductById(bp.product_id);
                         return (
                           <View key={idx} style={styles.boxProductItem}>
                             <Text style={styles.boxProductName} numberOfLines={1}>
@@ -806,7 +771,7 @@ export default function ShipmentDetailScreen() {
                 <View style={styles.invoiceInfo}>
                   <View style={styles.invoiceRow}>
                     <Text style={styles.invoiceLabel}>Invoice #:</Text>
-                    <Text style={styles.invoiceValue}>{invoice.invoiceNumber}</Text>
+                    <Text style={styles.invoiceValue}>{invoice.invoice_number}</Text>
                   </View>
                   <View style={styles.invoiceRow}>
                     <Text style={styles.invoiceLabel}>Date:</Text>
@@ -815,7 +780,7 @@ export default function ShipmentDetailScreen() {
                   <View style={styles.invoiceRow}>
                     <Text style={styles.invoiceLabel}>Total Amount:</Text>
                     <Text style={styles.invoiceValue}>
-                      {invoice.currency} {invoice.totalAmount.toLocaleString()}
+                      {userSettings.currency || 'USD'} {(invoice.amount || 0).toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -973,21 +938,6 @@ const styles = StyleSheet.create({
   statusText: {
     ...typography.small,
     fontWeight: '600',
-  },
-  statusActions: {
-    marginTop: spacing.lg,
-  },
-  statusBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    gap: spacing.sm,
-  },
-  statusBtnText: {
-    ...typography.bodyBold,
-    color: '#FFF',
   },
   statsGrid: {
     flexDirection: 'row',

@@ -132,27 +132,54 @@ export default function AddInvoiceScreen() {
 
   const handlePdfPick = async () => {
     try {
+      console.log('Opening PDF picker...');
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/pdf',
         copyToCacheDirectory: true,
       });
 
+      console.log('PDF picker result:', JSON.stringify(result));
+
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
+        console.log('PDF selected:', asset.name, 'URI:', asset.uri);
+        
         setFileUri(asset.uri);
         setFileType('pdf');
         setRetryCount(0);
+        setIsProcessing(true);
         
-        // Read PDF as base64
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        
-        await processOCR(base64, 'pdf');
+        try {
+          // Read PDF as base64
+          console.log('Reading PDF file...');
+          const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          
+          console.log('PDF base64 length:', base64.length);
+          
+          if (!base64 || base64.length === 0) {
+            throw new Error('Failed to read PDF file - empty content');
+          }
+          
+          await processOCR(base64, 'pdf');
+        } catch (readError: any) {
+          console.error('PDF read error:', readError);
+          setIsProcessing(false);
+          Alert.alert(
+            'PDF Read Error',
+            readError.message || 'Could not read PDF file. Please try taking a photo of the invoice instead.',
+            [
+              { text: 'OK', onPress: () => resetFile() }
+            ]
+          );
+        }
+      } else {
+        console.log('PDF picker cancelled or no asset');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('PDF picker error:', error);
-      Alert.alert('Error', 'Failed to pick PDF file');
+      Alert.alert('Error', error.message || 'Failed to pick PDF file');
     }
   };
 

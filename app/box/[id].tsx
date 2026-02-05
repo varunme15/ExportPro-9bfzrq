@@ -23,20 +23,20 @@ export default function BoxDetailScreen() {
     );
   }
 
-  const boxType = getBoxTypeById(box.boxTypeId);
+  const boxType = getBoxTypeById(box.box_type_id);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Get available products (with inventory > 0)
-  const availableProducts = products.filter(p => p.availableQuantity > 0);
+  const availableProducts = products.filter(p => p.available_quantity > 0);
   const filteredProducts = availableProducts.filter(p => 
     searchQuery === '' || 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.hsCode.includes(searchQuery)
+    p.hs_code.includes(searchQuery)
   );
 
   const handleAddProduct = (productId: string, qty: number) => {
-    const existingIndex = box.products.findIndex(p => p.productId === productId);
+    const existingIndex = box.products.findIndex(p => p.product_id === productId);
     let newProducts = [...box.products];
     
     if (existingIndex >= 0) {
@@ -45,7 +45,7 @@ export default function BoxDetailScreen() {
         quantity: newProducts[existingIndex].quantity + qty,
       };
     } else {
-      newProducts.push({ productId, quantity: qty });
+      newProducts.push({ product_id: productId, quantity: qty });
     }
 
     updateBoxProducts(shipment.id, box.id, newProducts);
@@ -63,7 +63,7 @@ export default function BoxDetailScreen() {
           text: 'Remove', 
           style: 'destructive',
           onPress: () => {
-            const newProducts = box.products.filter(p => p.productId !== productId);
+            const newProducts = box.products.filter(p => p.product_id !== productId);
             updateBoxProducts(shipment.id, box.id, newProducts);
           }
         },
@@ -73,8 +73,8 @@ export default function BoxDetailScreen() {
 
   const handleUpdateQuantity = (productId: string, newQty: number) => {
     const product = getProductById(productId);
-    const currentBoxQty = box.products.find(p => p.productId === productId)?.quantity || 0;
-    const maxAvailable = (product?.availableQuantity || 0) + currentBoxQty;
+    const currentBoxQty = box.products.find(p => p.product_id === productId)?.quantity || 0;
+    const maxAvailable = (product?.available_quantity || 0) + currentBoxQty;
 
     if (newQty <= 0) {
       handleRemoveProduct(productId);
@@ -87,9 +87,17 @@ export default function BoxDetailScreen() {
     }
 
     const newProducts = box.products.map(p => 
-      p.productId === productId ? { ...p, quantity: newQty } : p
+      p.product_id === productId ? { ...p, quantity: newQty } : p
     );
     updateBoxProducts(shipment.id, box.id, newProducts);
+  };
+
+  // Get product rate from invoices
+  const getProductRate = (product: any) => {
+    if (product.invoices && product.invoices.length > 0) {
+      return product.invoices.reduce((sum: number, inv: any) => sum + inv.rate, 0) / product.invoices.length;
+    }
+    return 0;
   };
 
   return (
@@ -99,7 +107,7 @@ export default function BoxDetailScreen() {
         <Pressable style={styles.backBtn} onPress={() => router.back()}>
           <MaterialIcons name="arrow-back" size={24} color={theme.textPrimary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Box #{box.boxNumber}</Text>
+        <Text style={styles.headerTitle}>Box #{box.box_number}</Text>
         <Pressable 
           style={styles.labelBtn}
           onPress={() => router.push(`/box-label?shipmentId=${shipmentId}&boxId=${id}`)}
@@ -122,7 +130,7 @@ export default function BoxDetailScreen() {
             <View style={styles.boxDetails}>
               <Text style={styles.boxType}>{boxType?.name || 'Unknown'}</Text>
               <Text style={styles.boxDimensions}>
-                {boxType ? `${boxType.length} × ${boxType.width} × ${boxType.height} cm` : ''}
+                {boxType?.dimensions || 'N/A'}
               </Text>
             </View>
           </View>
@@ -139,12 +147,8 @@ export default function BoxDetailScreen() {
               <Text style={styles.boxStatLabel}>Items</Text>
             </View>
             <View style={styles.boxStatItem}>
-              <Text style={styles.boxStatValue}>{box.netWeight.toFixed(1)}</Text>
-              <Text style={styles.boxStatLabel}>Net kg</Text>
-            </View>
-            <View style={styles.boxStatItem}>
-              <Text style={styles.boxStatValue}>{box.grossWeight.toFixed(1)}</Text>
-              <Text style={styles.boxStatLabel}>Gross kg</Text>
+              <Text style={styles.boxStatValue}>{(box.weight || 0).toFixed(1)}</Text>
+              <Text style={styles.boxStatLabel}>Weight kg</Text>
             </View>
           </View>
         </View>
@@ -176,30 +180,32 @@ export default function BoxDetailScreen() {
             </View>
           ) : (
             box.products.map(bp => {
-              const product = getProductById(bp.productId);
+              const product = getProductById(bp.product_id);
               if (!product) return null;
 
+              const avgRate = getProductRate(product);
+
               return (
-                <View key={bp.productId} style={styles.productCard}>
+                <View key={bp.product_id} style={styles.productCard}>
                   <View style={styles.productInfo}>
                     <View style={styles.hsCodeBadge}>
-                      <Text style={styles.hsCodeText}>{product.hsCode}</Text>
+                      <Text style={styles.hsCodeText}>{product.hs_code}</Text>
                     </View>
                     <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
-                    <Text style={styles.productRate}>${product.rate.toFixed(2)}/{product.unit}</Text>
+                    <Text style={styles.productRate}>${avgRate.toFixed(2)}/{product.unit}</Text>
                   </View>
                   
                   <View style={styles.qtyControls}>
                     <Pressable 
                       style={styles.qtyBtn}
-                      onPress={() => handleUpdateQuantity(bp.productId, bp.quantity - 1)}
+                      onPress={() => handleUpdateQuantity(bp.product_id, bp.quantity - 1)}
                     >
                       <MaterialIcons name="remove" size={20} color={theme.textSecondary} />
                     </Pressable>
                     <Text style={styles.qtyValue}>{bp.quantity}</Text>
                     <Pressable 
                       style={styles.qtyBtn}
-                      onPress={() => handleUpdateQuantity(bp.productId, bp.quantity + 1)}
+                      onPress={() => handleUpdateQuantity(bp.product_id, bp.quantity + 1)}
                     >
                       <MaterialIcons name="add" size={20} color={theme.primary} />
                     </Pressable>
@@ -207,7 +213,7 @@ export default function BoxDetailScreen() {
 
                   <Pressable 
                     style={styles.removeBtn}
-                    onPress={() => handleRemoveProduct(bp.productId)}
+                    onPress={() => handleRemoveProduct(bp.product_id)}
                   >
                     <MaterialIcons name="delete-outline" size={20} color={theme.error} />
                   </Pressable>
@@ -224,8 +230,9 @@ export default function BoxDetailScreen() {
               <Text style={styles.totalLabel}>Box Value</Text>
               <Text style={styles.totalValue}>
                 ${box.products.reduce((sum, bp) => {
-                  const product = getProductById(bp.productId);
-                  return sum + (product ? bp.quantity * product.rate : 0);
+                  const product = getProductById(bp.product_id);
+                  const rate = product ? getProductRate(product) : 0;
+                  return sum + (bp.quantity * rate);
                 }, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </Text>
             </View>
@@ -257,7 +264,7 @@ export default function BoxDetailScreen() {
 
             <ScrollView style={styles.productList}>
               {filteredProducts.map(product => {
-                const inBox = box.products.find(p => p.productId === product.id);
+                const inBox = box.products.find(p => p.product_id === product.id);
                 return (
                   <Pressable 
                     key={product.id} 
@@ -266,11 +273,11 @@ export default function BoxDetailScreen() {
                   >
                     <View style={styles.productOptionInfo}>
                       <View style={styles.hsCodeBadge}>
-                        <Text style={styles.hsCodeText}>{product.hsCode}</Text>
+                        <Text style={styles.hsCodeText}>{product.hs_code}</Text>
                       </View>
                       <Text style={styles.productOptionName} numberOfLines={1}>{product.name}</Text>
                       <Text style={styles.productOptionStock}>
-                        Available: {product.availableQuantity} {product.unit}
+                        Available: {product.available_quantity} {product.unit}
                         {inBox ? ` (${inBox.quantity} in box)` : ''}
                       </Text>
                     </View>

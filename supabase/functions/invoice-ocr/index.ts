@@ -44,35 +44,29 @@ Deno.serve(async (req) => {
     // Determine mime type
     const mimeType = type === 'pdf' ? 'application/pdf' : 'image/jpeg';
 
-    console.log(`Processing ${type} file, mime type: ${mimeType}`);
+    console.log(`Processing ${type} file, mime type: ${mimeType}, base64 length: ${cleanBase64.length}`);
 
-    // Build the message content based on file type
-    // For PDFs, we use inline_data which Gemini supports for document processing
-    const messageContent = type === 'pdf' 
-      ? [
-          {
-            type: 'text',
-            text: 'Extract all invoice data from this PDF document and return the JSON object. Make sure to extract supplier information, invoice details (number, date, amount), and all product line items with their names, quantities, units, rates/prices, and HS codes if visible.'
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${cleanBase64}`
-            }
-          }
-        ]
-      : [
-          {
-            type: 'text',
-            text: 'Extract all invoice data from this image and return the JSON object.'
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${cleanBase64}`
-            }
-          }
-        ];
+    // PDF files are not well supported via image_url - inform user
+    if (type === 'pdf') {
+      console.log('PDF file detected - attempting to process but may have limited support');
+    }
+
+    // Build the message content
+    // Note: PDF support via base64 is limited in most vision models
+    const messageContent = [
+      {
+        type: 'text',
+        text: type === 'pdf' 
+          ? 'Extract all invoice data from this PDF document and return the JSON object. Make sure to extract supplier information, invoice details (number, date, amount), and all product line items with their names, quantities, units, rates/prices, and HS codes if visible.'
+          : 'Extract all invoice data from this image and return the JSON object.'
+      },
+      {
+        type: 'image_url',
+        image_url: {
+          url: `data:${mimeType};base64,${cleanBase64}`
+        }
+      }
+    ];
 
     // Call OnSpace AI for OCR
     const aiResponse = await fetch(`${baseUrl}/chat/completions`, {
@@ -149,6 +143,47 @@ Rules:
     console.log('AI Response received, length:', extractedText.length);
     console.log('AI Response preview:', extractedText.substring(0, 500));
 
+    // Check if AI returned an error or couldn't process the file
+    if (!extractedText || extractedText.trim() === '') {
+      console.error('Empty response from AI');
+      const errorMsg = type === 'pdf' 
+        ? 'Could not extract data from PDF. PDF parsing has limited support. Please try uploading an image (photo or screenshot) of the invoice instead.'
+        : 'Could not extract data from image. Please try with a clearer image.';
+      return new Response(
+        JSON.stringify({ error: errorMsg }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check for common AI refusal patterns
+    const refusalPatterns = [
+      'cannot process',
+      'unable to',
+      'not able to',
+      'cannot read',
+      'cannot extract',
+      'cannot access',
+      'sorry',
+      'i apologize',
+      'not supported',
+      'cannot view',
+      'cannot see'
+    ];
+    
+    const lowerText = extractedText.toLowerCase();
+    const hasRefusal = refusalPatterns.some(pattern => lowerText.includes(pattern));
+    
+    if (hasRefusal && !lowerText.includes('{')) {
+      console.error('AI refused to process:', extractedText.substring(0, 200));
+      const errorMsg = type === 'pdf'
+        ? 'Unable to parse PDF document. PDF files have limited support with AI vision. Please convert your PDF to an image (screenshot or photo) and try again.'
+        : 'Unable to extract data from this image. Please try with a clearer, higher resolution image.';
+      return new Response(
+        JSON.stringify({ error: errorMsg }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Parse the JSON response
     let extractedData;
     try {
@@ -162,13 +197,25 @@ Rules:
       const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         cleanText = jsonMatch[0];
+      } else {
+        // No JSON found in response
+        console.error('No JSON found in response:', extractedText.substring(0, 300));
+        const errorMsg = type === 'pdf'
+          ? 'Could not parse PDF invoice. PDF parsing is limited. Please try taking a photo or screenshot of the invoice instead.'
+          : 'Could not extract structured data from this image. Please try with a clearer image or enter data manually.';
+        throw new Error(errorMsg);
       }
       
       extractedData = JSON.parse(cleanText);
-    } catch (parseError) {
-      console.error('JSON parse error:', parseError, 'Raw text:', extractedText);
+    } catch (parseError: any) {
+      console.error('JSON parse error:', parseError, 'Raw text:', extractedText.substring(0, 500));
+      const errorMsg = parseError.message && parseError.message.includes('PDF')
+        ? parseError.message
+        : type === 'pdf'
+          ? 'Failed to parse PDF invoice data. PDF support is limited. Please try uploading an image (photo/screenshot) of the invoice instead.'
+          : 'Failed to parse extracted data. Please try again with a clearer image or enter data manually.';
       return new Response(
-        JSON.stringify({ error: 'Failed to parse AI response. Please try again or enter data manually.' }),
+        JSON.stringify({ error: errorMsg }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

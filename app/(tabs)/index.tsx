@@ -5,12 +5,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
-import { SHIPMENT_STATUS } from '../../constants/config';
+import { SHIPMENT_STATUS, getCurrencySymbol, formatCurrencyCompact } from '../../constants/config';
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { suppliers, invoices, products, shipments } = useApp();
+  const { suppliers, invoices, products, shipments, userSettings } = useApp();
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
 
   // Calculate total inventory value using average rate from all invoices
   const totalInventoryValue = products.reduce((sum, p) => {
@@ -63,7 +64,7 @@ export default function DashboardScreen() {
         <View style={styles.heroCard}>
           <View style={styles.heroCardGradient}>
             <Text style={styles.heroLabel}>TOTAL INVENTORY VALUE</Text>
-            <Text style={styles.heroValue}>${totalInventoryValue.toLocaleString()}</Text>
+            <Text style={styles.heroValue}>{currencySymbol}{totalInventoryValue.toLocaleString()}</Text>
             <View style={styles.heroSubRow}>
               <MaterialIcons name="inventory-2" size={16} color="rgba(255,255,255,0.8)" />
               <Text style={styles.heroSubText}>{totalInventoryItems.toLocaleString()} items in stock</Text>

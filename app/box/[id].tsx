@@ -5,12 +5,14 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
+import { getCurrencySymbol } from '../../constants/config';
 
 export default function BoxDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, shipmentId } = useLocalSearchParams();
-  const { shipments, products, getBoxTypeById, getProductById, updateBoxProducts } = useApp();
+  const { shipments, products, getBoxTypeById, getProductById, updateBoxProducts, userSettings } = useApp();
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
 
   const shipment = shipments.find(s => s.id === shipmentId);
   const box = shipment?.boxes.find(b => b.id === id);
@@ -192,7 +194,7 @@ export default function BoxDetailScreen() {
                       <Text style={styles.hsCodeText}>{product.hs_code}</Text>
                     </View>
                     <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
-                    <Text style={styles.productRate}>${avgRate.toFixed(2)}/{product.unit}</Text>
+                    <Text style={styles.productRate}>{currencySymbol}{avgRate.toFixed(2)}/{product.unit}</Text>
                   </View>
                   
                   <View style={styles.qtyControls}>
@@ -229,7 +231,7 @@ export default function BoxDetailScreen() {
             <View style={styles.totalCard}>
               <Text style={styles.totalLabel}>Box Value</Text>
               <Text style={styles.totalValue}>
-                ${box.products.reduce((sum, bp) => {
+                {currencySymbol}{box.products.reduce((sum, bp) => {
                   const product = getProductById(bp.product_id);
                   const rate = product ? getProductRate(product) : 0;
                   return sum + (bp.quantity * rate);

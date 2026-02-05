@@ -6,12 +6,14 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
+import { getCurrencySymbol } from '../../constants/config';
 
 export default function InvoiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams();
-  const { invoices, products, getSupplierById, deleteInvoice, updateInvoice } = useApp();
+  const { invoices, products, getSupplierById, deleteInvoice, updateInvoice, userSettings } = useApp();
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
 
   const invoice = invoices.find(i => i.id === id);
   
@@ -43,7 +45,7 @@ export default function InvoiceDetailScreen() {
   const handleDelete = () => {
     Alert.alert(
       'Delete Invoice',
-      `Are you sure you want to delete invoice #${invoice.invoiceNumber}? All products will also be deleted.`,
+      `Are you sure you want to delete invoice #${invoice.invoice_number}? All products will also be deleted.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -75,7 +77,7 @@ export default function InvoiceDetailScreen() {
             <Text style={styles.hsCodeText}>{item.hs_code}</Text>
           </View>
           <Text style={styles.productValue}>
-            ${itemValue.toLocaleString()}
+            {currencySymbol}{itemValue.toLocaleString()}
           </Text>
         </View>
         <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
@@ -86,7 +88,7 @@ export default function InvoiceDetailScreen() {
         )}
         <View style={styles.productStats}>
           <Text style={styles.productQty}>
-            {invoiceQuantity} {item.unit} × ${invoiceRate.toFixed(2)}
+            {invoiceQuantity} {item.unit} × {currencySymbol}{invoiceRate.toFixed(2)}
           </Text>
           <View style={styles.stockIndicator}>
             <View style={[styles.stockDot, { backgroundColor: stockColor }]} />
@@ -122,7 +124,7 @@ export default function InvoiceDetailScreen() {
           <View style={styles.invoiceHeader}>
             <View>
               <Text style={styles.invoiceLabel}>Invoice Number</Text>
-              <Text style={styles.invoiceNumber}>#{invoice.invoiceNumber}</Text>
+              <Text style={styles.invoiceNumber}>#{invoice.invoice_number}</Text>
             </View>
             <View style={[
               styles.statusBadge,
@@ -151,7 +153,7 @@ export default function InvoiceDetailScreen() {
           <View style={styles.totalSection}>
             <Text style={styles.totalLabel}>Total Amount</Text>
             <Text style={styles.totalValue}>
-              ${(invoice.amount || 0).toLocaleString()}
+              {currencySymbol}{(invoice.amount || 0).toLocaleString()}
             </Text>
           </View>
 
@@ -220,7 +222,7 @@ export default function InvoiceDetailScreen() {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Calculated Value</Text>
                 <Text style={[styles.summaryValue, { color: theme.success }]}>
-                  ${totalValue.toLocaleString()}
+                  {currencySymbol}{totalValue.toLocaleString()}
                 </Text>
               </View>
             </View>

@@ -5,12 +5,14 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
+import { getCurrencySymbol, formatCurrencyCompact } from '../../constants/config';
 
 export default function SupplierDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams();
-  const { suppliers, invoices, products, deleteSupplier, getInvoicesBySupplier } = useApp();
+  const { suppliers, invoices, products, deleteSupplier, getInvoicesBySupplier, userSettings } = useApp();
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
 
   const supplier = suppliers.find(s => s.id === id);
   
@@ -120,7 +122,7 @@ export default function SupplierDetailScreen() {
             <View style={styles.heroStatDivider} />
             <View style={styles.heroStatItem}>
               <Text style={[styles.heroStatValue, { color: theme.success }]}>
-                ${(totalValue/1000).toFixed(1)}k
+                {formatCurrencyCompact(totalValue, userSettings.currency)}
               </Text>
               <Text style={styles.heroStatLabel}>Value</Text>
             </View>
@@ -158,7 +160,7 @@ export default function SupplierDetailScreen() {
               <MaterialIcons name="person" size={20} color={theme.textSecondary} />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Contact Person</Text>
-                <Text style={styles.infoValue}>{supplier.contactPerson}</Text>
+                <Text style={styles.infoValue}>{supplier.contact}</Text>
               </View>
             </View>
 
@@ -222,7 +224,7 @@ export default function SupplierDetailScreen() {
                 </View>
                 <View style={styles.invoiceRight}>
                   <Text style={styles.invoiceAmount}>
-                    ${(invoice.amount || 0).toLocaleString()}
+                    {currencySymbol}{(invoice.amount || 0).toLocaleString()}
                   </Text>
                   <View style={[
                     styles.statusBadge,

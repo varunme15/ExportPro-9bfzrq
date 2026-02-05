@@ -42,6 +42,54 @@ export const PAYMENT_STATUS = {
 
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'CNY', 'JPY', 'INR', 'AUD', 'CAD'];
 
+// Currency symbols mapping
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  CNY: '¥',
+  INR: '₹',
+  AUD: 'A$',
+  CAD: 'C$',
+  CHF: 'CHF',
+  AED: 'د.إ',
+  SGD: 'S$',
+  HKD: 'HK$',
+  NZD: 'NZ$',
+  KRW: '₩',
+  MXN: 'MX$',
+  BRL: 'R$',
+  ZAR: 'R',
+  THB: '฿',
+  MYR: 'RM',
+  IDR: 'Rp',
+  PHP: '₱',
+  VND: '₫',
+  BDT: '৳',
+  PKR: '₨',
+};
+
+// Helper function to get currency symbol
+export const getCurrencySymbol = (currencyCode: string): string => {
+  return CURRENCY_SYMBOLS[currencyCode?.toUpperCase()] || currencyCode || '$';
+};
+
+// Format amount with currency symbol
+export const formatCurrency = (amount: number, currencyCode: string = 'USD'): string => {
+  const symbol = getCurrencySymbol(currencyCode);
+  return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Format amount with currency symbol (compact, no decimals for large numbers)
+export const formatCurrencyCompact = (amount: number, currencyCode: string = 'USD'): string => {
+  const symbol = getCurrencySymbol(currencyCode);
+  if (amount >= 1000) {
+    return `${symbol}${(amount / 1000).toFixed(1)}k`;
+  }
+  return `${symbol}${amount.toLocaleString()}`;
+};
+
 export const COUNTRIES = [
   'United States', 'United Kingdom', 'Germany', 'France', 'Italy', 'Spain',
   'China', 'India', 'Vietnam', 'Bangladesh', 'Thailand', 'Indonesia',

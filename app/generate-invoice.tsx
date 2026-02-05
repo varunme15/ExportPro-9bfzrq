@@ -8,6 +8,7 @@ import * as FileSystem from 'expo-file-system';
 import { shareAsync } from 'expo-sharing';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
+import { getCurrencySymbol } from '../constants/config';
 
 interface LineItem {
   hsCode: string;
@@ -30,7 +31,8 @@ export default function GenerateInvoiceScreen() {
   const { shipments, getProductById, userSettings, getCustomerById } = useApp();
 
   const shipment = shipments.find(s => s.id === shipmentId);
-  const customer = shipment?.customerId ? getCustomerById(shipment.customerId) : null;
+  const customer = shipment?.customer_id ? getCustomerById(shipment.customer_id) : null;
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
   
   if (!shipment) {
     return (
@@ -46,12 +48,12 @@ export default function GenerateInvoiceScreen() {
     
     shipment.boxes.forEach(box => {
       box.products.forEach(bp => {
-        const existing = productMap.get(bp.productId);
-        const product = getProductById(bp.productId);
+        const existing = productMap.get(bp.product_id);
+        const product = getProductById(bp.product_id);
         if (existing) {
           existing.quantity += bp.quantity;
         } else {
-          productMap.set(bp.productId, { quantity: bp.quantity, product });
+          productMap.set(bp.product_id, { quantity: bp.quantity, product });
         }
       });
     });
@@ -66,30 +68,35 @@ export default function GenerateInvoiceScreen() {
     allProducts.forEach(({ quantity, product }, productId) => {
       if (!product) return;
       
-      const existing = hsCodeMap.get(product.hsCode);
+      const existing = hsCodeMap.get(product.hs_code);
+      // Get average rate from product invoices
+      const avgRate = product.invoices && product.invoices.length > 0
+        ? product.invoices.reduce((sum: number, inv: any) => sum + inv.rate, 0) / product.invoices.length
+        : 0;
+      
       if (existing) {
         existing.products.push({
           productId,
           name: product.name,
           quantity,
-          rate: product.rate,
+          rate: avgRate,
           unit: product.unit,
         });
         existing.totalQuantity += quantity;
-        existing.totalValue += quantity * product.rate;
+        existing.totalValue += quantity * avgRate;
       } else {
-        hsCodeMap.set(product.hsCode, {
-          hsCode: product.hsCode,
+        hsCodeMap.set(product.hs_code, {
+          hsCode: product.hs_code,
           description: '',
           products: [{
             productId,
             name: product.name,
             quantity,
-            rate: product.rate,
+            rate: avgRate,
             unit: product.unit,
           }],
           totalQuantity: quantity,
-          totalValue: quantity * product.rate,
+          totalValue: quantity * avgRate,
         });
       }
     });
@@ -163,7 +170,7 @@ export default function GenerateInvoiceScreen() {
         ['Exporter:', '', '', '', 'Invoice no. & Date', '', '', 'Exporter IE Code no.'],
         [`M/s ${userSettings.name}`, '', '', '', shipment.name, new Date().toLocaleDateString(), '', ''],
         [userSettings.name, '', '', '', "Buyer's Order No.", '', '', ''],
-        [userSettings.address, '', '', '', shipment.lotNumber || 'N/A', '', '', ''],
+        [userSettings.address, '', '', '', shipment.lot_number || 'N/A', '', '', ''],
         [`${userSettings.city}, ${userSettings.state} ${userSettings.country}`, '', '', '', 'Other Reference (s)', '', '', ''],
         [''],
         
@@ -329,7 +336,7 @@ export default function GenerateInvoiceScreen() {
       return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 !== 0 ? ' ' + convertLessThanThousand(n % 100) : '');
     };
     
-    const intPart = Math.floor(num);
+    let intPart = Math.floor(num);
     const decPart = Math.round((num - intPart) * 100);
     
     let result = '';
@@ -402,7 +409,7 @@ export default function GenerateInvoiceScreen() {
               </View>
               <View style={styles.lineItemTotals}>
                 <Text style={styles.totalQty}>{item.totalQuantity} pcs</Text>
-                <Text style={styles.totalVal}>${item.totalValue.toLocaleString()}</Text>
+                <Text style={styles.totalVal}>{currencySymbol}{item.totalValue.toLocaleString()}</Text>
               </View>
             </View>
 
@@ -464,12 +471,12 @@ export default function GenerateInvoiceScreen() {
                   <View style={styles.productInfo}>
                     <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
                     <Text style={styles.productDetails}>
-                      {product.quantity} {product.unit} × ${product.rate.toFixed(2)}
+                      {product.quantity} {product.unit} × {currencySymbol}{product.rate.toFixed(2)}
                     </Text>
                   </View>
                   <View style={styles.productValue}>
                     <Text style={styles.productValueText}>
-                      ${(product.quantity * product.rate).toLocaleString()}
+                      {currencySymbol}{(product.quantity * product.rate).toLocaleString()}
                     </Text>
                     {item.products.length > 1 && (
                       <MaterialIcons name="call-split" size={16} color={theme.primary} />
@@ -493,7 +500,7 @@ export default function GenerateInvoiceScreen() {
           </View>
           <View style={[styles.summaryRow, styles.summaryTotal]}>
             <Text style={styles.totalLabel}>TOTAL VALUE</Text>
-            <Text style={styles.totalValue}>${totalValue.toLocaleString()}</Text>
+            <Text style={styles.totalValue}>{currencySymbol}{totalValue.toLocaleString()}</Text>
           </View>
         </View>
 

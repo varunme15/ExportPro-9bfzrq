@@ -6,11 +6,13 @@ import { useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
+import { getCurrencySymbol, formatCurrencyCompact } from '../../constants/config';
 
 export default function InventoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { products, invoices, getSupplierById } = useApp();
+  const { products, invoices, getSupplierById, userSettings } = useApp();
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterHSCode, setFilterHSCode] = useState<string | null>(null);
 
@@ -33,7 +35,7 @@ export default function InventoryScreen() {
     const avgRate = p.invoices && p.invoices.length > 0
       ? p.invoices.reduce((rateSum, inv) => rateSum + inv.rate, 0) / p.invoices.length
       : 0;
-    return sum + (p.availableQuantity * avgRate);
+    return sum + (p.available_quantity * avgRate);
   }, 0);
   const totalItems = products.reduce((sum, p) => sum + p.availableQuantity, 0);
 
@@ -72,7 +74,7 @@ export default function InventoryScreen() {
           <View style={styles.hsCodeBadge}>
             <Text style={styles.hsCodeText}>{item.hs_code}</Text>
           </View>
-          <Text style={styles.productRate}>${avgRate.toFixed(2)}/{item.unit}</Text>
+          <Text style={styles.productRate}>{currencySymbol}{avgRate.toFixed(2)}/{item.unit}</Text>
         </View>
         <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
         {item.alternate_names && item.alternate_names.length > 0 && (
@@ -123,7 +125,7 @@ export default function InventoryScreen() {
         </View>
         <View style={[styles.summaryCard, { backgroundColor: theme.successLight }]}>
           <MaterialIcons name="attach-money" size={20} color={theme.success} />
-          <Text style={styles.summaryValue}>${(totalValue/1000).toFixed(1)}k</Text>
+          <Text style={styles.summaryValue}>{formatCurrencyCompact(totalValue, userSettings.currency)}</Text>
           <Text style={styles.summaryLabel}>Value</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: theme.warningLight }]}>

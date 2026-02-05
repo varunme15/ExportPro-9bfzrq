@@ -9,12 +9,14 @@ import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
+import { getCurrencySymbol } from '../../constants/config';
 
 export default function ShipmentDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const { shipments, products, invoices, deleteShipment, removeBoxFromShipment, getBoxTypeById, getProductById, getCustomerById, getSupplierById, userSettings } = useApp();
+  const currencySymbol = getCurrencySymbol(userSettings.currency);
 
   const shipment = shipments.find(s => s.id === id);
   const customer = shipment?.customer_id ? getCustomerById(shipment.customer_id) : null;
@@ -780,7 +782,7 @@ export default function ShipmentDetailScreen() {
                   <View style={styles.invoiceRow}>
                     <Text style={styles.invoiceLabel}>Total Amount:</Text>
                     <Text style={styles.invoiceValue}>
-                      {userSettings.currency || 'USD'} {(invoice.amount || 0).toLocaleString()}
+                      {currencySymbol} {(invoice.amount || 0).toLocaleString()}
                     </Text>
                   </View>
                 </View>

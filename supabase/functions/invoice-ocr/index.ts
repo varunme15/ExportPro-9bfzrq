@@ -12,11 +12,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { imageBase64 } = await req.json();
+    const { imageBase64, pdfBase64, fileType } = await req.json();
 
-    if (!imageBase64) {
+    const fileData = imageBase64 || pdfBase64;
+    const type = fileType || (pdfBase64 ? 'pdf' : 'image');
+
+    if (!fileData) {
       return new Response(
-        JSON.stringify({ error: 'Image data is required' }),
+        JSON.stringify({ error: 'Image or PDF data is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -32,6 +35,14 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Determine mime type and format data URL
+    let dataUrl: string;
+    if (type === 'pdf') {
+      dataUrl = fileData.startsWith('data:') ? fileData : `data:application/pdf;base64,${fileData}`;
+    } else {
+      dataUrl = fileData.startsWith('data:') ? fileData : `data:image/jpeg;base64,${fileData}`;
+    }
+
     // Call OnSpace AI for OCR
     const aiResponse = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -44,7 +55,7 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: `You are an invoice data extraction expert. Extract structured data from invoice images and return ONLY a valid JSON object with no markdown formatting, no code blocks, no explanations. The JSON must have this exact structure:
+            content: `You are an invoice data extraction expert. Extract structured data from invoice ${type === 'pdf' ? 'PDFs' : 'images'} and return ONLY a valid JSON object with no markdown formatting, no code blocks, no explanations. The JSON must have this exact structure:
 {
   "supplier": {
     "name": "string",
@@ -77,19 +88,21 @@ Rules:
 - Product unit should be one of: pcs, kg, m, box, set, carton, roll
 - Extract HS codes if visible (usually 6-10 digit codes)
 - Date format must be YYYY-MM-DD
-- Supplier country should be the full country name if identifiable`
+- Supplier country should be the full country name if identifiable
+- For PDFs, extract data from all pages if multiple pages exist
+- Combine products from all pages into a single products array`
           },
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: 'Extract all invoice data from this image and return the JSON object.'
+                text: `Extract all invoice data from this ${type === 'pdf' ? 'PDF document' : 'image'} and return the JSON object.`
               },
               {
                 type: 'image_url',
                 image_url: {
-                  url: imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
+                  url: dataUrl
                 }
               }
             ]

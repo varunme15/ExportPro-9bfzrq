@@ -17,8 +17,8 @@ export default function BoxLabelScreen() {
 
   const shipment = shipments.find(s => s.id === shipmentId);
   const box = getBoxById(shipmentId as string, boxId as string);
-  const customer = shipment?.customerId ? getCustomerById(shipment.customerId) : null;
-  const boxType = box ? getBoxTypeById(box.boxTypeId) : null;
+  const customer = shipment?.customer_id ? getCustomerById(shipment.customer_id) : null;
+  const boxType = box ? getBoxTypeById(box.box_type_id) : null;
 
   if (!shipment || !box) {
     return (
@@ -31,7 +31,10 @@ export default function BoxLabelScreen() {
   const qrData = `exp://box/${shipmentId}/${boxId}`;
   const qrCodeRef = useRef<any>(null);
 
-  const generateLabelHTML = (shipment: any, box: any, customer: any, boxType: any, userSettings: any) => {
+  const generateLabelHTML = (shipmentData: any, boxData: any, customerData: any, boxTypeData: any, settings: any) => {
+    const dimensions = boxTypeData?.dimensions || 'N/A';
+    const weight = boxData.weight || 0;
+    
     return `
       <!DOCTYPE html>
       <html>
@@ -65,43 +68,39 @@ export default function BoxLabelScreen() {
             <div class="number-section">
               <div class="number-box">
                 <div class="number-label">LOT NUMBER</div>
-                <div class="number-value">${shipment.lotNumber || 'N/A'}</div>
+                <div class="number-value">${shipmentData.lot_number || 'N/A'}</div>
               </div>
               <div class="number-box">
                 <div class="number-label">BOX NUMBER</div>
-                <div class="number-value">#${box.boxNumber}</div>
+                <div class="number-value">#${boxData.box_number}</div>
               </div>
             </div>
             <div class="party">
               <div class="party-title">📤 CONSIGNOR (FROM)</div>
-              <div class="party-name">${userSettings.name}</div>
-              <div class="party-address">${userSettings.address}</div>
-              <div class="party-address">${[userSettings.city, userSettings.state, userSettings.country].filter(Boolean).join(', ')}</div>
+              <div class="party-name">${settings.name || 'N/A'}</div>
+              <div class="party-address">${settings.address || ''}</div>
+              <div class="party-address">${[settings.city, settings.state, settings.country].filter(Boolean).join(', ')}</div>
             </div>
             <div class="party">
               <div class="party-title">📥 CONSIGNEE (TO)</div>
-              <div class="party-name">${customer ? customer.name : shipment.destination}</div>
-              ${customer ? `
-                <div class="party-address">${customer.address}</div>
-                <div class="party-address">${[customer.city, customer.state, customer.country].filter(Boolean).join(', ')}</div>
+              <div class="party-name">${customerData ? customerData.name : shipmentData.destination}</div>
+              ${customerData ? `
+                <div class="party-address">${customerData.address || ''}</div>
+                <div class="party-address">${[customerData.city, customerData.state, customerData.country].filter(Boolean).join(', ')}</div>
               ` : ''}
             </div>
             <div class="details">
               <div class="detail-row">
                 <span class="detail-label">Box Type:</span>
-                <span class="detail-value">${boxType?.name || 'Unknown'}</span>
+                <span class="detail-value">${boxTypeData?.name || 'Unknown'}</span>
               </div>
               <div class="detail-row">
                 <span class="detail-label">Dimensions:</span>
-                <span class="detail-value">${boxType ? `${boxType.length}×${boxType.width}×${boxType.height} cm` : 'N/A'}</span>
+                <span class="detail-value">${dimensions}</span>
               </div>
               <div class="detail-row">
-                <span class="detail-label">Net Weight:</span>
-                <span class="detail-value">${box.netWeight.toFixed(2)} kg</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Gross Weight:</span>
-                <span class="detail-value">${box.grossWeight.toFixed(2)} kg</span>
+                <span class="detail-label">Weight:</span>
+                <span class="detail-value">${weight.toFixed(2)} kg</span>
               </div>
             </div>
             <div class="qr-section">
@@ -162,11 +161,11 @@ export default function BoxLabelScreen() {
             <View style={styles.numberSection}>
               <View style={styles.numberBox}>
                 <Text style={styles.numberLabel}>LOT NUMBER</Text>
-                <Text style={styles.numberValue}>{shipment.lotNumber || 'N/A'}</Text>
+                <Text style={styles.numberValue}>{shipment.lot_number || 'N/A'}</Text>
               </View>
               <View style={styles.numberBox}>
                 <Text style={styles.numberLabel}>BOX NUMBER</Text>
-                <Text style={styles.numberValue}>#{box.boxNumber}</Text>
+                <Text style={styles.numberValue}>#{box.box_number}</Text>
               </View>
             </View>
 
@@ -176,8 +175,8 @@ export default function BoxLabelScreen() {
                 <MaterialIcons name="upload" size={18} color={theme.primary} />
                 <Text style={styles.partyTitle}>CONSIGNOR (FROM)</Text>
               </View>
-              <Text style={styles.partyName}>{userSettings.name}</Text>
-              <Text style={styles.partyAddress}>{userSettings.address}</Text>
+              <Text style={styles.partyName}>{userSettings.name || 'N/A'}</Text>
+              <Text style={styles.partyAddress}>{userSettings.address || ''}</Text>
               <Text style={styles.partyLocation}>
                 {[userSettings.city, userSettings.state, userSettings.country].filter(Boolean).join(', ')}
               </Text>
@@ -192,7 +191,7 @@ export default function BoxLabelScreen() {
               {customer ? (
                 <>
                   <Text style={styles.partyName}>{customer.name}</Text>
-                  <Text style={styles.partyAddress}>{customer.address}</Text>
+                  <Text style={styles.partyAddress}>{customer.address || ''}</Text>
                   <Text style={styles.partyLocation}>
                     {[customer.city, customer.state, customer.country].filter(Boolean).join(', ')}
                   </Text>
@@ -211,16 +210,12 @@ export default function BoxLabelScreen() {
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Dimensions:</Text>
                 <Text style={styles.detailValue}>
-                  {boxType ? `${boxType.length}×${boxType.width}×${boxType.height} cm` : 'N/A'}
+                  {boxType?.dimensions || 'N/A'}
                 </Text>
               </View>
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Net Weight:</Text>
-                <Text style={styles.detailValue}>{box.netWeight.toFixed(2)} kg</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Gross Weight:</Text>
-                <Text style={styles.detailValue}>{box.grossWeight.toFixed(2)} kg</Text>
+                <Text style={styles.detailLabel}>Weight:</Text>
+                <Text style={styles.detailValue}>{(box.weight || 0).toFixed(2)} kg</Text>
               </View>
             </View>
 

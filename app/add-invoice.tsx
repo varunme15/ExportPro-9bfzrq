@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Image, Alert, ActivityIndicator, Modal } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Image, Alert, ActivityIndicator, Modal, Dimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
@@ -38,6 +39,15 @@ interface ExtractedData {
   products: ExtractedProduct[];
 }
 
+interface CropRegion {
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+}
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 export default function AddInvoiceScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -59,6 +69,17 @@ export default function AddInvoiceScreen() {
   const [similarWarning, setSimilarWarning] = useState<any>(null);
   const [editingProductIndex, setEditingProductIndex] = useState<number | null>(null);
 
+  // Retry functionality state
+  const [showRetryModal, setShowRetryModal] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [imageQuality, setImageQuality] = useState(0.8);
+  const [lastError, setLastError] = useState<string>('');
+  const [originalImageUri, setOriginalImageUri] = useState<string | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  const [cropRegion, setCropRegion] = useState<CropRegion | null>(null);
+  const maxRetries = 3;
+
   const handleImagePick = async (source: 'camera' | 'library') => {
     try {
       let result;
@@ -70,9 +91,9 @@ export default function AddInvoiceScreen() {
         }
         result = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          quality: 0.8,
-          base64: true,
+          allowsEditing: false, // Disable default editing to use custom crop
+          quality: 1, // Get highest quality initially
+          base64: false,
         });
       } else {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -82,20 +103,26 @@ export default function AddInvoiceScreen() {
         }
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          quality: 0.8,
-          base64: true,
+          allowsEditing: false,
+          quality: 1,
+          base64: false,
         });
       }
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
+        setOriginalImageUri(asset.uri);
         setFileUri(asset.uri);
         setFileType('image');
+        setRetryCount(0);
+        setImageQuality(0.8);
         
-        if (asset.base64) {
-          await processOCR(asset.base64, 'image');
+        // Get image dimensions for crop
+        if (asset.width && asset.height) {
+          setImageDimensions({ width: asset.width, height: asset.height });
         }
+        
+        await processImageWithQuality(asset.uri, 0.8);
       }
     } catch (error) {
       console.error('Image picker error:', error);
@@ -114,6 +141,7 @@ export default function AddInvoiceScreen() {
         const asset = result.assets[0];
         setFileUri(asset.uri);
         setFileType('pdf');
+        setRetryCount(0);
         
         // Read PDF as base64
         const base64 = await FileSystem.readAsStringAsync(asset.uri, {
@@ -125,6 +153,44 @@ export default function AddInvoiceScreen() {
     } catch (error) {
       console.error('PDF picker error:', error);
       Alert.alert('Error', 'Failed to pick PDF file');
+    }
+  };
+
+  const processImageWithQuality = async (uri: string, quality: number, crop?: CropRegion) => {
+    setIsProcessing(true);
+    try {
+      // Apply image manipulations
+      const actions: ImageManipulator.Action[] = [];
+      
+      if (crop) {
+        actions.push({ crop });
+      }
+      
+      // Resize if image is too large (max 2000px on longest side)
+      if (imageDimensions.width > 2000 || imageDimensions.height > 2000) {
+        const scale = 2000 / Math.max(imageDimensions.width, imageDimensions.height);
+        actions.push({
+          resize: {
+            width: Math.round(imageDimensions.width * scale),
+            height: Math.round(imageDimensions.height * scale),
+          }
+        });
+      }
+      
+      const manipResult = await ImageManipulator.manipulateAsync(
+        uri,
+        actions,
+        { compress: quality, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+      
+      setFileUri(manipResult.uri);
+      
+      if (manipResult.base64) {
+        await processOCR(manipResult.base64, 'image');
+      }
+    } catch (error: any) {
+      console.error('Image processing error:', error);
+      handleOCRError(error.message || 'Failed to process image');
     }
   };
 
@@ -165,6 +231,7 @@ export default function AddInvoiceScreen() {
         };
         
         setExtractedData(extractedWithSelection);
+        setRetryCount(0); // Reset retry count on success
         
         // Check for matching supplier
         const similar = checkSimilarSupplier(extracted.supplier.name);
@@ -195,16 +262,72 @@ export default function AddInvoiceScreen() {
         
         // Show review modal
         setShowReviewModal(true);
+      } else {
+        throw new Error('No data extracted from document');
       }
     } catch (error: any) {
       console.error('OCR error:', error);
-      Alert.alert(
-        'OCR Failed',
-        error.message || 'Could not extract data from file. Please enter manually.',
-        [{ text: 'OK' }]
-      );
+      handleOCRError(error.message || 'Could not extract data from file');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleOCRError = (errorMessage: string) => {
+    setLastError(errorMessage);
+    setIsProcessing(false);
+    
+    // Auto-retry with lower quality if we haven't exceeded max retries
+    if (retryCount < maxRetries && fileType === 'image' && originalImageUri) {
+      const newRetryCount = retryCount + 1;
+      setRetryCount(newRetryCount);
+      
+      // Reduce quality progressively
+      const newQuality = Math.max(0.4, imageQuality - 0.15);
+      setImageQuality(newQuality);
+      
+      // Auto-retry with lower quality
+      Alert.alert(
+        'OCR Failed',
+        `Attempt ${newRetryCount}/${maxRetries} failed. Retrying with adjusted settings...`,
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => setShowRetryModal(true)
+          },
+          {
+            text: 'Auto-Retry',
+            onPress: () => processImageWithQuality(originalImageUri, newQuality)
+          },
+          {
+            text: 'Manual Adjust',
+            onPress: () => setShowRetryModal(true)
+          }
+        ]
+      );
+    } else {
+      // Show retry modal with options
+      setShowRetryModal(true);
+    }
+  };
+
+  const handleManualRetry = async () => {
+    if (!originalImageUri) return;
+    setShowRetryModal(false);
+    await processImageWithQuality(originalImageUri, imageQuality, cropRegion || undefined);
+  };
+
+  const handleCropImage = () => {
+    setShowRetryModal(false);
+    setShowCropModal(true);
+  };
+
+  const applyCrop = (region: CropRegion) => {
+    setCropRegion(region);
+    setShowCropModal(false);
+    if (originalImageUri) {
+      processImageWithQuality(originalImageUri, imageQuality, region);
     }
   };
 
@@ -310,6 +433,16 @@ export default function AddInvoiceScreen() {
     }
   };
 
+  const resetFile = () => {
+    setFileUri(null);
+    setOriginalImageUri(null);
+    setExtractedData(null);
+    setRetryCount(0);
+    setImageQuality(0.8);
+    setCropRegion(null);
+    setLastError('');
+  };
+
   const selectedProductCount = extractedData?.products.filter(p => p.selected).length || 0;
 
   return (
@@ -385,15 +518,19 @@ export default function AddInvoiceScreen() {
               {isProcessing && (
                 <View style={styles.processingOverlay}>
                   <ActivityIndicator size="large" color="#FFF" />
-                  <Text style={styles.processingText}>Extracting data...</Text>
+                  <Text style={styles.processingText}>
+                    {retryCount > 0 ? `Retrying (${retryCount}/${maxRetries})...` : 'Extracting data...'}
+                  </Text>
+                  {retryCount > 0 && (
+                    <Text style={styles.processingSubtext}>
+                      Quality: {Math.round(imageQuality * 100)}%
+                    </Text>
+                  )}
                 </View>
               )}
               <Pressable 
                 style={styles.removeFileBtn}
-                onPress={() => {
-                  setFileUri(null);
-                  setExtractedData(null);
-                }}
+                onPress={resetFile}
               >
                 <MaterialIcons name="close" size={20} color="#FFF" />
               </Pressable>
@@ -416,9 +553,6 @@ export default function AddInvoiceScreen() {
             </Pressable>
           )}
 
-          {/* Supplier Selection */}
-          <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>SELECT SUPPLIER</Text>
-          
           {similarWarning && selectedSupplier && (
             <View style={styles.aiExtractedBox}>
               <MaterialIcons name="smart-toy" size={18} color={theme.primary} />
@@ -427,6 +561,9 @@ export default function AddInvoiceScreen() {
               </Text>
             </View>
           )}
+
+          {/* Supplier Selection */}
+          <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>SELECT SUPPLIER</Text>
 
           {matchedSupplier && (
             <View style={styles.matchedSupplierBox}>
@@ -768,6 +905,189 @@ export default function AddInvoiceScreen() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
+
+      {/* Retry Options Modal */}
+      <Modal
+        visible={showRetryModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowRetryModal(false)}
+      >
+        <View style={styles.retryModalOverlay}>
+          <View style={styles.retryModalContent}>
+            <View style={styles.retryModalHeader}>
+              <MaterialIcons name="error-outline" size={32} color={theme.error} />
+              <Text style={styles.retryModalTitle}>OCR Failed</Text>
+            </View>
+            
+            <Text style={styles.retryModalError} numberOfLines={3}>
+              {lastError}
+            </Text>
+
+            <View style={styles.retryAttemptInfo}>
+              <Text style={styles.retryAttemptText}>
+                Attempts: {retryCount}/{maxRetries}
+              </Text>
+            </View>
+
+            {fileType === 'image' && (
+              <>
+                <Text style={styles.retryOptionLabel}>IMAGE QUALITY</Text>
+                <View style={styles.qualitySliderContainer}>
+                  <Text style={styles.qualityLabel}>Low</Text>
+                  <View style={styles.qualityOptions}>
+                    {[0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0].map(q => (
+                      <Pressable
+                        key={q}
+                        style={[
+                          styles.qualityOption,
+                          imageQuality === q && styles.qualityOptionActive
+                        ]}
+                        onPress={() => setImageQuality(q)}
+                      >
+                        <Text style={[
+                          styles.qualityOptionText,
+                          imageQuality === q && styles.qualityOptionTextActive
+                        ]}>
+                          {Math.round(q * 100)}%
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={styles.qualityLabel}>High</Text>
+                </View>
+
+                <Text style={styles.qualityHint}>
+                  Lower quality may help with large or complex images
+                </Text>
+              </>
+            )}
+
+            <View style={styles.retryActions}>
+              {fileType === 'image' && (
+                <Pressable style={styles.retryActionBtn} onPress={handleCropImage}>
+                  <MaterialIcons name="crop" size={20} color={theme.primary} />
+                  <Text style={styles.retryActionText}>Crop Image</Text>
+                </Pressable>
+              )}
+              
+              <Pressable 
+                style={[styles.retryActionBtn, styles.retryActionBtnPrimary]} 
+                onPress={handleManualRetry}
+              >
+                <MaterialIcons name="refresh" size={20} color="#FFF" />
+                <Text style={styles.retryActionTextPrimary}>Retry OCR</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.retrySecondaryActions}>
+              <Pressable 
+                style={styles.retrySecondaryBtn}
+                onPress={() => {
+                  setShowRetryModal(false);
+                  resetFile();
+                }}
+              >
+                <Text style={styles.retrySecondaryText}>Choose Different File</Text>
+              </Pressable>
+              
+              <Pressable 
+                style={styles.retrySecondaryBtn}
+                onPress={() => setShowRetryModal(false)}
+              >
+                <Text style={styles.retrySecondaryText}>Enter Manually</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Simple Crop Modal */}
+      <Modal
+        visible={showCropModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowCropModal(false)}
+      >
+        <SafeAreaView style={styles.cropModalContainer}>
+          <View style={styles.cropModalHeader}>
+            <Pressable onPress={() => setShowCropModal(false)}>
+              <MaterialIcons name="close" size={24} color={theme.textPrimary} />
+            </Pressable>
+            <Text style={styles.cropModalTitle}>Crop Image</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <View style={styles.cropContent}>
+            {originalImageUri && (
+              <Image 
+                source={{ uri: originalImageUri }} 
+                style={styles.cropPreviewImage}
+                resizeMode="contain"
+              />
+            )}
+            
+            <Text style={styles.cropInstructions}>
+              Select a preset crop area to focus on the invoice content
+            </Text>
+
+            <View style={styles.cropPresets}>
+              <Pressable 
+                style={styles.cropPresetBtn}
+                onPress={() => applyCrop({
+                  originX: 0,
+                  originY: 0,
+                  width: imageDimensions.width,
+                  height: Math.round(imageDimensions.height * 0.5)
+                })}
+              >
+                <MaterialIcons name="vertical-align-top" size={24} color={theme.primary} />
+                <Text style={styles.cropPresetText}>Top Half</Text>
+              </Pressable>
+
+              <Pressable 
+                style={styles.cropPresetBtn}
+                onPress={() => applyCrop({
+                  originX: 0,
+                  originY: Math.round(imageDimensions.height * 0.5),
+                  width: imageDimensions.width,
+                  height: Math.round(imageDimensions.height * 0.5)
+                })}
+              >
+                <MaterialIcons name="vertical-align-bottom" size={24} color={theme.primary} />
+                <Text style={styles.cropPresetText}>Bottom Half</Text>
+              </Pressable>
+
+              <Pressable 
+                style={styles.cropPresetBtn}
+                onPress={() => applyCrop({
+                  originX: Math.round(imageDimensions.width * 0.1),
+                  originY: Math.round(imageDimensions.height * 0.1),
+                  width: Math.round(imageDimensions.width * 0.8),
+                  height: Math.round(imageDimensions.height * 0.8)
+                })}
+              >
+                <MaterialIcons name="center-focus-strong" size={24} color={theme.primary} />
+                <Text style={styles.cropPresetText}>Center 80%</Text>
+              </Pressable>
+
+              <Pressable 
+                style={styles.cropPresetBtn}
+                onPress={() => {
+                  setCropRegion(null);
+                  setShowCropModal(false);
+                  if (originalImageUri) {
+                    processImageWithQuality(originalImageUri, imageQuality);
+                  }
+                }}
+              >
+                <MaterialIcons name="fullscreen" size={24} color={theme.primary} />
+                <Text style={styles.cropPresetText}>Full Image</Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -883,6 +1203,11 @@ const styles = StyleSheet.create({
     color: '#FFF',
     marginTop: spacing.md,
     ...typography.body,
+  },
+  processingSubtext: {
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: spacing.xs,
+    ...typography.small,
   },
   removeFileBtn: {
     position: 'absolute',
@@ -1284,5 +1609,189 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: theme.success,
+  },
+  // Retry Modal Styles
+  retryModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  retryModalContent: {
+    backgroundColor: theme.background,
+    borderRadius: borderRadius.lg,
+    padding: spacing.xl,
+    width: '100%',
+    maxWidth: 400,
+    ...shadows.cardElevated,
+  },
+  retryModalHeader: {
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  retryModalTitle: {
+    ...typography.cardValue,
+    color: theme.textPrimary,
+    marginTop: spacing.sm,
+  },
+  retryModalError: {
+    ...typography.caption,
+    color: theme.error,
+    backgroundColor: `${theme.error}10`,
+    padding: spacing.md,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.lg,
+    textAlign: 'center',
+  },
+  retryAttemptInfo: {
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  retryAttemptText: {
+    ...typography.caption,
+    color: theme.textSecondary,
+  },
+  retryOptionLabel: {
+    ...typography.small,
+    color: theme.textSecondary,
+    marginBottom: spacing.sm,
+    fontWeight: '600',
+  },
+  qualitySliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  qualityLabel: {
+    ...typography.small,
+    color: theme.textMuted,
+    width: 35,
+  },
+  qualityOptions: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  qualityOption: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: theme.backgroundSecondary,
+  },
+  qualityOptionActive: {
+    backgroundColor: theme.primary,
+  },
+  qualityOptionText: {
+    ...typography.small,
+    color: theme.textSecondary,
+  },
+  qualityOptionTextActive: {
+    color: '#FFF',
+    fontWeight: '600',
+  },
+  qualityHint: {
+    ...typography.small,
+    color: theme.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  retryActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  retryActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: theme.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  retryActionBtnPrimary: {
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
+  },
+  retryActionText: {
+    ...typography.bodyBold,
+    color: theme.primary,
+  },
+  retryActionTextPrimary: {
+    ...typography.bodyBold,
+    color: '#FFF',
+  },
+  retrySecondaryActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.lg,
+  },
+  retrySecondaryBtn: {
+    padding: spacing.sm,
+  },
+  retrySecondaryText: {
+    ...typography.caption,
+    color: theme.textSecondary,
+    textDecorationLine: 'underline',
+  },
+  // Crop Modal Styles
+  cropModalContainer: {
+    flex: 1,
+    backgroundColor: theme.background,
+  },
+  cropModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  cropModalTitle: {
+    ...typography.bodyBold,
+    color: theme.textPrimary,
+  },
+  cropContent: {
+    flex: 1,
+    padding: spacing.lg,
+    alignItems: 'center',
+  },
+  cropPreviewImage: {
+    width: SCREEN_WIDTH - spacing.lg * 2,
+    height: 300,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.lg,
+  },
+  cropInstructions: {
+    ...typography.body,
+    color: theme.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.xl,
+  },
+  cropPresets: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  cropPresetBtn: {
+    width: (SCREEN_WIDTH - spacing.lg * 4) / 2,
+    backgroundColor: theme.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+    ...shadows.card,
+  },
+  cropPresetText: {
+    ...typography.caption,
+    color: theme.textPrimary,
+    marginTop: spacing.sm,
+    fontWeight: '600',
   },
 });

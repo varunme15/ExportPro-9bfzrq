@@ -1,19 +1,36 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { FlashList } from '@shopify/flash-list';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
-import { useApp } from '../../contexts/AppContext';
+import { useApp, Payment } from '../../contexts/AppContext';
 import { getCurrencySymbol } from '../../constants/config';
 
 export default function InvoiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams();
-  const { invoices, products, getSupplierById, deleteInvoice, updateInvoice, userSettings } = useApp();
+  const { 
+    invoices, 
+    products, 
+    getSupplierById, 
+    deleteInvoice, 
+    updateInvoice, 
+    userSettings,
+    payments,
+    addPayment,
+    deletePayment,
+    getPaymentsByInvoice,
+    getInvoicePaidAmount,
+  } = useApp();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
+
+  const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const invoice = invoices.find(i => i.id === id);
   
@@ -38,14 +55,104 @@ export default function InvoiceDetailScreen() {
     return sum + (quantity * rate);
   }, 0);
 
-  const handleMarkProcessed = () => {
-    updateInvoice(invoice.id, { payment_status: 'paid' });
+  // Payment calculations
+  const invoicePayments = getPaymentsByInvoice(invoice.id);
+  const totalPaid = getInvoicePaidAmount(invoice.id);
+  const remainingAmount = Math.max(0, invoice.amount - totalPaid);
+  const paidPercentage = invoice.amount > 0 ? Math.min(100, (totalPaid / invoice.amount) * 100) : 0;
+
+  // Determine actual payment status
+  const actualStatus = totalPaid >= invoice.amount ? 'paid' : totalPaid > 0 ? 'partial' : 'unpaid';
+
+  const handleAddPayment = async () => {
+    const amount = parseFloat(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid payment amount');
+      return;
+    }
+
+    if (amount > remainingAmount) {
+      Alert.alert(
+        'Overpayment',
+        `This payment (${currencySymbol}${amount.toFixed(2)}) exceeds the remaining balance (${currencySymbol}${remainingAmount.toFixed(2)}). Continue anyway?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Continue', onPress: () => submitPayment(amount) }
+        ]
+      );
+      return;
+    }
+
+    await submitPayment(amount);
+  };
+
+  const submitPayment = async (amount: number) => {
+    setIsSubmitting(true);
+    try {
+      await addPayment({
+        invoice_id: invoice.id,
+        amount,
+        payment_date: new Date(paymentDate).toISOString(),
+        notes: paymentNotes.trim() || undefined,
+      });
+      
+      setShowAddPaymentModal(false);
+      setPaymentAmount('');
+      setPaymentNotes('');
+      setPaymentDate(new Date().toISOString().split('T')[0]);
+    } catch (error) {
+      console.error('Error adding payment:', error);
+      Alert.alert('Error', 'Failed to add payment');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeletePayment = (payment: Payment) => {
+    Alert.alert(
+      'Delete Payment',
+      `Delete payment of ${currencySymbol}${payment.amount.toFixed(2)} from ${formatDate(payment.payment_date)}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: () => deletePayment(payment.id)
+        }
+      ]
+    );
+  };
+
+  const handleMarkFullyPaid = () => {
+    if (remainingAmount <= 0) {
+      Alert.alert('Already Paid', 'This invoice is already fully paid');
+      return;
+    }
+
+    Alert.alert(
+      'Mark as Fully Paid',
+      `Add payment of ${currencySymbol}${remainingAmount.toFixed(2)} to mark this invoice as fully paid?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Confirm',
+          onPress: async () => {
+            await addPayment({
+              invoice_id: invoice.id,
+              amount: remainingAmount,
+              payment_date: new Date().toISOString(),
+              notes: 'Marked as fully paid',
+            });
+          }
+        }
+      ]
+    );
   };
 
   const handleDelete = () => {
     Alert.alert(
       'Delete Invoice',
-      `Are you sure you want to delete invoice #${invoice.invoice_number}? All products will also be deleted.`,
+      `Are you sure you want to delete invoice #${invoice.invoice_number}? All products and payment records will also be deleted.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -59,6 +166,36 @@ export default function InvoiceDetailScreen() {
       ]
     );
   };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const formatShortDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric'
+    });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'paid': return { bg: theme.successLight, text: theme.success };
+      case 'partial': return { bg: `${theme.warning}20`, text: theme.warning };
+      default: return { bg: `${theme.error}20`, text: theme.error };
+    }
+  };
+
+  const statusColor = getStatusColor(actualStatus);
 
   const renderProduct = ({ item }: { item: typeof products[0] }) => {
     const stockPercentage = (item.available_quantity / item.quantity) * 100;
@@ -126,15 +263,9 @@ export default function InvoiceDetailScreen() {
               <Text style={styles.invoiceLabel}>Invoice Number</Text>
               <Text style={styles.invoiceNumber}>#{invoice.invoice_number}</Text>
             </View>
-            <View style={[
-              styles.statusBadge,
-              { backgroundColor: invoice.payment_status === 'paid' ? theme.successLight : theme.warningLight }
-            ]}>
-              <Text style={[
-                styles.statusText,
-                { color: invoice.payment_status === 'paid' ? theme.success : theme.warning }
-              ]}>
-                {invoice.payment_status}
+            <View style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}>
+              <Text style={[styles.statusText, { color: statusColor.text }]}>
+                {actualStatus}
               </Text>
             </View>
           </View>
@@ -156,14 +287,112 @@ export default function InvoiceDetailScreen() {
               {currencySymbol}{(invoice.amount || 0).toLocaleString()}
             </Text>
           </View>
-
-          {invoice.payment_status === 'unpaid' && (
-            <Pressable style={styles.markProcessedBtn} onPress={handleMarkProcessed}>
-              <MaterialIcons name="check-circle" size={18} color="#FFF" />
-              <Text style={styles.markProcessedText}>Mark as Paid</Text>
-            </Pressable>
-          )}
         </View>
+
+        {/* Payment Progress Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>PAYMENT STATUS</Text>
+          <View style={styles.paymentProgressCard}>
+            {/* Progress Bar */}
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                <View 
+                  style={[
+                    styles.progressFill, 
+                    { 
+                      width: `${paidPercentage}%`,
+                      backgroundColor: actualStatus === 'paid' ? theme.success : actualStatus === 'partial' ? theme.warning : theme.border
+                    }
+                  ]} 
+                />
+              </View>
+              <Text style={styles.progressPercentage}>{Math.round(paidPercentage)}%</Text>
+            </View>
+
+            {/* Amount Details */}
+            <View style={styles.paymentAmounts}>
+              <View style={styles.paymentAmountItem}>
+                <Text style={styles.paymentAmountLabel}>Paid</Text>
+                <Text style={[styles.paymentAmountValue, { color: theme.success }]}>
+                  {currencySymbol}{totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </Text>
+              </View>
+              <View style={styles.paymentAmountDivider} />
+              <View style={styles.paymentAmountItem}>
+                <Text style={styles.paymentAmountLabel}>Remaining</Text>
+                <Text style={[styles.paymentAmountValue, { color: remainingAmount > 0 ? theme.error : theme.textMuted }]}>
+                  {currencySymbol}{remainingAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </Text>
+              </View>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.paymentActions}>
+              <Pressable 
+                style={[styles.addPaymentBtn, remainingAmount <= 0 && styles.btnDisabled]}
+                onPress={() => setShowAddPaymentModal(true)}
+                disabled={remainingAmount <= 0}
+              >
+                <MaterialIcons name="add" size={18} color={remainingAmount > 0 ? '#FFF' : theme.textMuted} />
+                <Text style={[styles.addPaymentBtnText, remainingAmount <= 0 && styles.btnTextDisabled]}>
+                  Record Payment
+                </Text>
+              </Pressable>
+              {remainingAmount > 0 && (
+                <Pressable style={styles.markPaidBtn} onPress={handleMarkFullyPaid}>
+                  <MaterialIcons name="check-circle" size={18} color={theme.success} />
+                  <Text style={styles.markPaidBtnText}>Mark Fully Paid</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* Payment History */}
+        {invoicePayments.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>PAYMENT HISTORY ({invoicePayments.length})</Text>
+            <View style={styles.paymentHistoryCard}>
+              {invoicePayments.map((payment, index) => (
+                <View 
+                  key={payment.id} 
+                  style={[
+                    styles.paymentHistoryItem,
+                    index === invoicePayments.length - 1 && styles.paymentHistoryItemLast
+                  ]}
+                >
+                  <View style={styles.paymentHistoryIcon}>
+                    <MaterialIcons name="payment" size={20} color={theme.success} />
+                  </View>
+                  <View style={styles.paymentHistoryContent}>
+                    <View style={styles.paymentHistoryHeader}>
+                      <Text style={styles.paymentHistoryAmount}>
+                        {currencySymbol}{payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </Text>
+                      <Text style={styles.paymentHistoryDate}>
+                        {formatShortDate(payment.payment_date)}
+                      </Text>
+                    </View>
+                    {payment.notes && (
+                      <Text style={styles.paymentHistoryNotes} numberOfLines={2}>
+                        {payment.notes}
+                      </Text>
+                    )}
+                    <Text style={styles.paymentHistoryTimestamp}>
+                      Recorded: {formatDate(payment.created_at || payment.payment_date)}
+                    </Text>
+                  </View>
+                  <Pressable 
+                    style={styles.paymentDeleteBtn}
+                    onPress={() => handleDeletePayment(payment)}
+                  >
+                    <MaterialIcons name="close" size={18} color={theme.textMuted} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Products Section */}
         <View style={styles.section}>
@@ -229,6 +458,104 @@ export default function InvoiceDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Add Payment Modal */}
+      <Modal
+        visible={showAddPaymentModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAddPaymentModal(false)}
+      >
+        <KeyboardAvoidingView 
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <Pressable 
+            style={styles.modalBackdrop} 
+            onPress={() => setShowAddPaymentModal(false)}
+          />
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHandle} />
+            
+            <Text style={styles.modalTitle}>Record Payment</Text>
+            
+            <View style={styles.modalInvoiceInfo}>
+              <Text style={styles.modalInvoiceLabel}>Invoice #{invoice.invoice_number}</Text>
+              <Text style={styles.modalInvoiceRemaining}>
+                Remaining: {currencySymbol}{remainingAmount.toFixed(2)}
+              </Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Payment Amount *</Text>
+              <View style={styles.amountInputContainer}>
+                <Text style={styles.currencyPrefix}>{currencySymbol}</Text>
+                <TextInput
+                  style={styles.amountInput}
+                  placeholder="0.00"
+                  placeholderTextColor={theme.textMuted}
+                  value={paymentAmount}
+                  onChangeText={setPaymentAmount}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+              </View>
+              {remainingAmount > 0 && (
+                <Pressable 
+                  style={styles.quickFillBtn}
+                  onPress={() => setPaymentAmount(remainingAmount.toFixed(2))}
+                >
+                  <Text style={styles.quickFillText}>
+                    Fill remaining ({currencySymbol}{remainingAmount.toFixed(2)})
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Payment Date</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={theme.textMuted}
+                value={paymentDate}
+                onChangeText={setPaymentDate}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Notes (Optional)</Text>
+              <TextInput
+                style={[styles.input, styles.notesInput]}
+                placeholder="e.g., Bank transfer, Check #123"
+                placeholderTextColor={theme.textMuted}
+                value={paymentNotes}
+                onChangeText={setPaymentNotes}
+                multiline
+                numberOfLines={2}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable 
+                style={styles.modalCancelBtn}
+                onPress={() => setShowAddPaymentModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.modalSubmitBtn, isSubmitting && styles.btnDisabled]}
+                onPress={handleAddPayment}
+                disabled={isSubmitting}
+              >
+                <Text style={styles.modalSubmitText}>
+                  {isSubmitting ? 'Saving...' : 'Add Payment'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -321,7 +648,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     padding: spacing.md,
     alignItems: 'center',
-    marginBottom: spacing.md,
   },
   totalLabel: {
     ...typography.small,
@@ -333,19 +659,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.primary,
     marginTop: spacing.xs,
-  },
-  markProcessedBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.success,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
-  },
-  markProcessedText: {
-    ...typography.bodyBold,
-    color: '#FFF',
   },
   section: {
     paddingHorizontal: spacing.lg,
@@ -360,7 +673,163 @@ const styles = StyleSheet.create({
   sectionTitle: {
     ...typography.sectionHeader,
     color: theme.textSecondary,
+    marginBottom: spacing.md,
   },
+  // Payment Progress Card
+  paymentProgressCard: {
+    backgroundColor: theme.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    ...shadows.card,
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  progressBar: {
+    flex: 1,
+    height: 12,
+    backgroundColor: theme.border,
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: borderRadius.full,
+  },
+  progressPercentage: {
+    ...typography.bodyBold,
+    color: theme.textPrimary,
+    width: 45,
+    textAlign: 'right',
+  },
+  paymentAmounts: {
+    flexDirection: 'row',
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  paymentAmountItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  paymentAmountDivider: {
+    width: 1,
+    backgroundColor: theme.border,
+    marginHorizontal: spacing.md,
+  },
+  paymentAmountLabel: {
+    ...typography.small,
+    color: theme.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  paymentAmountValue: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  paymentActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  addPaymentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  addPaymentBtnText: {
+    ...typography.bodyBold,
+    color: '#FFF',
+  },
+  markPaidBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.success,
+  },
+  markPaidBtnText: {
+    ...typography.bodyBold,
+    color: theme.success,
+  },
+  btnDisabled: {
+    backgroundColor: theme.border,
+    borderColor: theme.border,
+  },
+  btnTextDisabled: {
+    color: theme.textMuted,
+  },
+  // Payment History
+  paymentHistoryCard: {
+    backgroundColor: theme.surface,
+    borderRadius: borderRadius.lg,
+    ...shadows.card,
+    overflow: 'hidden',
+  },
+  paymentHistoryItem: {
+    flexDirection: 'row',
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.borderLight,
+  },
+  paymentHistoryItemLast: {
+    borderBottomWidth: 0,
+  },
+  paymentHistoryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.full,
+    backgroundColor: `${theme.success}15`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  paymentHistoryContent: {
+    flex: 1,
+  },
+  paymentHistoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  paymentHistoryAmount: {
+    ...typography.bodyBold,
+    color: theme.success,
+  },
+  paymentHistoryDate: {
+    ...typography.caption,
+    color: theme.textSecondary,
+  },
+  paymentHistoryNotes: {
+    ...typography.small,
+    color: theme.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  paymentHistoryTimestamp: {
+    ...typography.small,
+    color: theme.textMuted,
+  },
+  paymentDeleteBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.sm,
+  },
+  // Products Section
   addProductBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -481,5 +950,129 @@ const styles = StyleSheet.create({
   summaryValue: {
     ...typography.bodyBold,
     color: theme.textPrimary,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    backgroundColor: theme.background,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    padding: spacing.lg,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: theme.border,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: theme.textPrimary,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  modalInvoiceInfo: {
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    alignItems: 'center',
+  },
+  modalInvoiceLabel: {
+    ...typography.bodyBold,
+    color: theme.textPrimary,
+  },
+  modalInvoiceRemaining: {
+    ...typography.caption,
+    color: theme.textSecondary,
+    marginTop: spacing.xs,
+  },
+  inputGroup: {
+    marginBottom: spacing.lg,
+  },
+  inputLabel: {
+    ...typography.caption,
+    color: theme.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  input: {
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    ...typography.body,
+    color: theme.textPrimary,
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+  },
+  currencyPrefix: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: theme.textSecondary,
+    marginRight: spacing.sm,
+  },
+  amountInput: {
+    flex: 1,
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.textPrimary,
+    paddingVertical: spacing.md,
+  },
+  quickFillBtn: {
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  quickFillText: {
+    ...typography.small,
+    color: theme.primary,
+    textDecorationLine: 'underline',
+  },
+  notesInput: {
+    height: 60,
+    textAlignVertical: 'top',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: theme.backgroundSecondary,
+  },
+  modalCancelText: {
+    ...typography.bodyBold,
+    color: theme.textSecondary,
+  },
+  modalSubmitBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: theme.primary,
+  },
+  modalSubmitText: {
+    ...typography.bodyBold,
+    color: '#FFF',
   },
 });

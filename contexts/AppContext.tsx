@@ -95,6 +95,16 @@ export interface Customer {
   created_at?: string;
 }
 
+export interface Payment {
+  id: string;
+  user_id?: string;
+  invoice_id: string;
+  amount: number;
+  payment_date: string;
+  notes?: string;
+  created_at?: string;
+}
+
 export interface UserSettings {
   name: string;
   email: string;
@@ -154,6 +164,14 @@ interface AppContextType {
   getShipmentsByCustomer: (customerId: string) => Shipment[];
   getBoxById: (shipmentId: string, boxId: string) => Box | undefined;
   
+  // Payments
+  payments: Payment[];
+  addPayment: (payment: Omit<Payment, 'id' | 'user_id' | 'created_at'>) => Promise<void>;
+  deletePayment: (id: string) => Promise<void>;
+  getPaymentsByInvoice: (invoiceId: string) => Payment[];
+  getInvoicePaidAmount: (invoiceId: string) => number;
+  getInvoicePaymentStatus: (invoiceId: string, invoiceAmount: number) => 'unpaid' | 'partial' | 'paid';
+
   // Helpers
   getSupplierById: (id: string) => Supplier | undefined;
   getInvoicesBySupplier: (supplierId: string) => Invoice[];
@@ -189,6 +207,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [boxTypes, setBoxTypes] = useState<BoxType[]>([]);
   const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Load all data when user changes
@@ -204,6 +223,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProducts([]);
       setBoxTypes([]);
       setShipments([]);
+      setPayments([]);
       setLoading(false);
     }
   }, [user?.id]);
@@ -221,6 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadProducts(),
         loadBoxTypes(),
         loadShipments(),
+        loadPayments(),
       ]);
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -1006,6 +1027,95 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getProductById = (id: string) => products.find(p => p.id === id);
   const getBoxTypeById = (id: string) => boxTypes.find(bt => bt.id === id);
 
+  // Load Payments
+  const loadPayments = async () => {
+    if (!user?.id) return;
+
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('payment_date', { ascending: false });
+
+    if (error) {
+      console.error('Error loading payments:', error);
+      return;
+    }
+
+    setPayments(data || []);
+  };
+
+  const addPayment = async (payment: Omit<Payment, 'id' | 'user_id' | 'created_at'>) => {
+    if (!user?.id) return;
+
+    const { data, error } = await supabase
+      .from('payments')
+      .insert([{ ...payment, user_id: user.id }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding payment:', error);
+      return;
+    }
+
+    if (data) {
+      setPayments(prev => [data, ...prev]);
+
+      // Auto-update invoice payment_status based on total paid
+      const invoice = invoices.find(inv => inv.id === payment.invoice_id);
+      if (invoice) {
+        const totalPaid = getPaymentsByInvoice(payment.invoice_id).reduce((sum, p) => sum + p.amount, 0) + payment.amount;
+        const newStatus = totalPaid >= invoice.amount ? 'paid' : totalPaid > 0 ? 'partial' : 'unpaid';
+        if (newStatus !== invoice.payment_status) {
+          await updateInvoice(invoice.id, { payment_status: newStatus });
+        }
+      }
+    }
+  };
+
+  const deletePayment = async (id: string) => {
+    const payment = payments.find(p => p.id === id);
+    
+    const { error } = await supabase
+      .from('payments')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting payment:', error);
+      return;
+    }
+
+    setPayments(prev => prev.filter(p => p.id !== id));
+
+    // Update invoice payment status after deletion
+    if (payment) {
+      const invoice = invoices.find(inv => inv.id === payment.invoice_id);
+      if (invoice) {
+        const remainingPayments = payments.filter(p => p.id !== id && p.invoice_id === payment.invoice_id);
+        const totalPaid = remainingPayments.reduce((sum, p) => sum + p.amount, 0);
+        const newStatus = totalPaid >= invoice.amount ? 'paid' : totalPaid > 0 ? 'partial' : 'unpaid';
+        if (newStatus !== invoice.payment_status) {
+          await updateInvoice(invoice.id, { payment_status: newStatus });
+        }
+      }
+    }
+  };
+
+  const getPaymentsByInvoice = (invoiceId: string) => 
+    payments.filter(p => p.invoice_id === invoiceId);
+
+  const getInvoicePaidAmount = (invoiceId: string) => 
+    payments.filter(p => p.invoice_id === invoiceId).reduce((sum, p) => sum + p.amount, 0);
+
+  const getInvoicePaymentStatus = (invoiceId: string, invoiceAmount: number): 'unpaid' | 'partial' | 'paid' => {
+    const paidAmount = getInvoicePaidAmount(invoiceId);
+    if (paidAmount >= invoiceAmount) return 'paid';
+    if (paidAmount > 0) return 'partial';
+    return 'unpaid';
+  };
+
   return (
     <AppContext.Provider value={{
       userSettings,
@@ -1042,6 +1152,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateBoxProducts,
       getShipmentsByCustomer,
       getBoxById,
+      payments,
+      addPayment,
+      deletePayment,
+      getPaymentsByInvoice,
+      getInvoicePaidAmount,
+      getInvoicePaymentStatus,
       getSupplierById,
       getInvoicesBySupplier,
       getProductsByInvoice,

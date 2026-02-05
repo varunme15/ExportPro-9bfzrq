@@ -209,12 +209,23 @@ export default function AddInvoiceScreen() {
           try {
             const statusCode = error.context?.status ?? 500;
             const textContent = await error.context?.text();
-            errorMessage = `[Code: ${statusCode}] ${textContent || error.message || 'Unknown error'}`;
+            // Try to parse as JSON to get the error message
+            try {
+              const jsonError = JSON.parse(textContent || '{}');
+              errorMessage = jsonError.error || textContent || error.message || 'Unknown error';
+            } catch {
+              errorMessage = textContent || error.message || 'Unknown error';
+            }
           } catch {
             errorMessage = `${error.message || 'Failed to read response'}`;
           }
         }
         throw new Error(errorMessage);
+      }
+
+      // Check if response contains an error field (edge function returned error)
+      if (data?.error) {
+        throw new Error(data.error);
       }
 
       if (data?.data) {
@@ -277,7 +288,28 @@ export default function AddInvoiceScreen() {
     setLastError(errorMessage);
     setIsProcessing(false);
     
-    // Auto-retry with lower quality if we haven't exceeded max retries
+    // For PDFs, show error alert directly since retry options don't apply
+    if (fileType === 'pdf') {
+      Alert.alert(
+        'PDF Processing Failed',
+        errorMessage,
+        [
+          {
+            text: 'Try Image Instead',
+            onPress: () => {
+              resetFile();
+            }
+          },
+          {
+            text: 'Enter Manually',
+            style: 'cancel'
+          }
+        ]
+      );
+      return;
+    }
+    
+    // Auto-retry with lower quality if we haven't exceeded max retries (images only)
     if (retryCount < maxRetries && fileType === 'image' && originalImageUri) {
       const newRetryCount = retryCount + 1;
       setRetryCount(newRetryCount);

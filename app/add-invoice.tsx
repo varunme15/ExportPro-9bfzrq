@@ -132,18 +132,13 @@ export default function AddInvoiceScreen() {
 
   const handlePdfPick = async () => {
     try {
-      Alert.alert('Debug', 'Opening PDF picker...');
-      
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/pdf',
         copyToCacheDirectory: true,
       });
 
-      Alert.alert('Debug', `Picker result: canceled=${result.canceled}, assets=${result.assets?.length || 0}`);
-
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
-        Alert.alert('Debug', `PDF: ${asset.name}, URI: ${asset.uri?.substring(0, 50)}...`);
         
         setFileUri(asset.uri);
         setFileType('pdf');
@@ -152,18 +147,14 @@ export default function AddInvoiceScreen() {
         
         try {
           // Read PDF as base64
-          Alert.alert('Debug', 'Reading PDF file as base64...');
           const base64 = await FileSystem.readAsStringAsync(asset.uri, {
             encoding: FileSystem.EncodingType.Base64,
           });
-          
-          Alert.alert('Debug', `Base64 length: ${base64?.length || 0}`);
           
           if (!base64 || base64.length === 0) {
             throw new Error('Failed to read PDF file - empty content');
           }
           
-          Alert.alert('Debug', 'Calling OCR...');
           await processOCR(base64, 'pdf');
         } catch (readError: any) {
           console.error('PDF read error:', readError);
@@ -176,12 +167,10 @@ export default function AddInvoiceScreen() {
             ]
           );
         }
-      } else {
-        Alert.alert('Debug', 'PDF picker was cancelled or returned no assets');
       }
     } catch (error: any) {
       console.error('PDF picker error:', error);
-      Alert.alert('PDF Picker Error', error.message || 'Failed to pick PDF file');
+      Alert.alert('Error', error.message || 'Failed to pick PDF file');
     }
   };
 

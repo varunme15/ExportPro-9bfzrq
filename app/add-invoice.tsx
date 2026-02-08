@@ -13,6 +13,7 @@ import { useApp } from '../contexts/AppContext';
 import { getSupabaseClient, useAuth } from '../template';
 import { getCurrencySymbol } from '../constants/config';
 import { SavingOverlay } from '../components';
+import { decode } from 'base64-arraybuffer';
 
 interface ExtractedProduct {
   name: string;
@@ -457,11 +458,60 @@ export default function AddInvoiceScreen() {
     await saveInvoice();
   };
 
+  // Upload image to Supabase storage and return public URL
+  const uploadImageToStorage = async (uri: string): Promise<string | null> => {
+    if (!user?.id) return null;
+    
+    try {
+      // Read the file as base64
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      if (!base64) return null;
+      
+      // Generate unique filename
+      const filename = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+      
+      // Upload to storage using base64-arraybuffer for mobile compatibility
+      const { data, error } = await supabase.storage
+        .from('invoice-images')
+        .upload(filename, decode(base64), {
+          contentType: 'image/jpeg',
+          upsert: false,
+        });
+      
+      if (error) {
+        console.error('Storage upload error:', error);
+        return null;
+      }
+      
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('invoice-images')
+        .getPublicUrl(filename);
+      
+      return urlData?.publicUrl || null;
+    } catch (error) {
+      console.error('Image upload error:', error);
+      return null;
+    }
+  };
+
   const saveInvoice = async () => {
     if (!user?.id) return;
 
     setIsSaving(true);
     try {
+      // Upload image to storage if exists (for camera/gallery images)
+      let imageUrl: string | undefined;
+      if (fileUri && fileType === 'image') {
+        const uploadedUrl = await uploadImageToStorage(fileUri);
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl;
+        }
+      }
+
       // Create invoice first and get its ID
       const { data: invoiceData, error: invoiceError } = await supabase
         .from('invoices')
@@ -472,7 +522,7 @@ export default function AddInvoiceScreen() {
           date,
           payment_status: 'unpaid',
           amount: parseFloat(totalAmount) || 0,
-          image_uri: fileUri || undefined,
+          image_uri: imageUrl,
         }])
         .select()
         .single();

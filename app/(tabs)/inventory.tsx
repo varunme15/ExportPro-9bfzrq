@@ -26,8 +26,11 @@ export default function InventoryScreen() {
   // Get unique HS codes
   const hsCodes = [...new Set(products.map(p => p.hs_code))].sort();
 
-  // Filter products
+  // Filter products - show all products with available quantity > 0
   const filteredProducts = products.filter(p => {
+    // Always show products with stock
+    if ((p.available_quantity || 0) <= 0) return false;
+    
     const matchesSearch = searchQuery === '' || 
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.hs_code.includes(searchQuery) ||
@@ -47,25 +50,33 @@ export default function InventoryScreen() {
   const totalItems = products.reduce((sum, p) => sum + (p.available_quantity || 0), 0);
 
   const getProductInvoices = (item: typeof products[0]) => {
+    // Handle products with no invoice links (manually added or legacy)
     if (!item.invoices || item.invoices.length === 0) {
-      return { count: 0, suppliers: [], avgRate: 0 };
+      return { count: 0, suppliers: ['Direct Entry'], avgRate: 0 };
     }
     
     // Get unique suppliers from invoices
     const supplierNames = new Set<string>();
+    let totalRate = 0;
+    let rateCount = 0;
+    
     item.invoices.forEach(pi => {
       const invoice = invoices.find(i => i.id === pi.invoice_id);
       if (invoice) {
         const supplier = getSupplierById(invoice.supplier_id);
         if (supplier) supplierNames.add(supplier.name);
       }
+      if (pi.rate > 0) {
+        totalRate += pi.rate;
+        rateCount++;
+      }
     });
     
-    const avgRate = item.invoices.reduce((sum, inv) => sum + inv.rate, 0) / item.invoices.length;
+    const avgRate = rateCount > 0 ? totalRate / rateCount : 0;
     
     return {
       count: item.invoices.length,
-      suppliers: Array.from(supplierNames),
+      suppliers: supplierNames.size > 0 ? Array.from(supplierNames) : ['Unknown'],
       avgRate,
     };
   };

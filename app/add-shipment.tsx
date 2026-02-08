@@ -5,6 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
+import { SavingOverlay } from '../components';
 
 export default function AddShipmentScreen() {
   const insets = useSafeAreaInsets();
@@ -15,6 +16,7 @@ export default function AddShipmentScreen() {
   const [destination, setDestination] = useState('');
   const [customerId, setCustomerId] = useState<string>('');
   const [lotNumber, setLotNumber] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const popularDestinations = [
     'New York, USA',
@@ -32,14 +34,20 @@ export default function AddShipmentScreen() {
       return;
     }
 
-    await addShipment({
-      name: name.trim(),
-      destination: destination.trim(),
-      customer_id: customerId || undefined,
-      lot_number: lotNumber.trim() || undefined,
-    });
-
-    router.back();
+    setIsSaving(true);
+    try {
+      await addShipment({
+        name: name.trim(),
+        destination: destination.trim(),
+        customer_id: customerId || undefined,
+        lot_number: lotNumber.trim() || undefined,
+      });
+      router.back();
+    } catch (error) {
+      console.error('Error creating shipment:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Auto-fill destination when customer is selected
@@ -180,6 +188,8 @@ export default function AddShipmentScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <SavingOverlay visible={isSaving} message="Creating Shipment..." />
     </SafeAreaView>
   );
 }

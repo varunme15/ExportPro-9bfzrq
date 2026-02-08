@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
 import { COUNTRIES } from '../constants/config';
+import { SavingOverlay } from '../components';
 
 export default function AddCustomerScreen() {
   const insets = useSafeAreaInsets();
@@ -19,23 +20,30 @@ export default function AddCustomerScreen() {
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [country, setCountry] = useState('United States');
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim() || !email.trim()) {
       return;
     }
 
-    addCustomer({
-      name: name.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
-      city: city.trim(),
-      state: state.trim(),
-      country,
-    });
-
-    router.back();
+    setIsSaving(true);
+    try {
+      await addCustomer({
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        state: state.trim(),
+        country,
+      });
+      router.back();
+    } catch (error) {
+      console.error('Error saving customer:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -157,6 +165,8 @@ export default function AddCustomerScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <SavingOverlay visible={isSaving} message="Saving Customer..." />
     </SafeAreaView>
   );
 }

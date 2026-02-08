@@ -12,6 +12,7 @@ import { theme, typography, spacing, shadows, borderRadius } from '../constants/
 import { useApp } from '../contexts/AppContext';
 import { getSupabaseClient, useAuth } from '../template';
 import { getCurrencySymbol } from '../constants/config';
+import { SavingOverlay } from '../components';
 
 interface ExtractedProduct {
   name: string;
@@ -79,6 +80,7 @@ export default function AddInvoiceScreen() {
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [cropRegion, setCropRegion] = useState<CropRegion | null>(null);
   const maxRetries = 3;
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleImagePick = async (source: 'camera' | 'library') => {
     try {
@@ -430,6 +432,7 @@ export default function AddInvoiceScreen() {
       return;
     }
 
+    setIsSaving(true);
     try {
       // Create invoice first and get its ID
       const { data: invoiceData, error: invoiceError } = await supabase
@@ -480,6 +483,8 @@ export default function AddInvoiceScreen() {
     } catch (error: any) {
       console.error('Save error:', error);
       Alert.alert('Error', error.message || 'Failed to save invoice');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1138,6 +1143,7 @@ export default function AddInvoiceScreen() {
           </View>
         </SafeAreaView>
       </Modal>
+    <SavingOverlay visible={isSaving} message="Saving Invoice..." />
     </SafeAreaView>
   );
 }

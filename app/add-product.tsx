@@ -6,6 +6,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
 import { COMMON_HS_CODES } from '../constants/config';
+import { SavingOverlay } from '../components';
 
 export default function AddProductScreen() {
   const insets = useSafeAreaInsets();
@@ -21,28 +22,35 @@ export default function AddProductScreen() {
   const [quantity, setQuantity] = useState('');
   const [rate, setRate] = useState('');
   const [unit, setUnit] = useState('pcs');
+  const [isSaving, setIsSaving] = useState(false);
 
   const units = ['pcs', 'pairs', 'sets', 'kg', 'meters', 'cartons'];
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim() || !hsCode.trim() || !quantity || !rate) {
       return;
     }
 
-    const qty = parseInt(quantity);
-    
-    addProduct({
-      invoiceId,
-      name: name.trim(),
-      hsCode: hsCode.trim(),
-      alternateNames: alternateNames.split(',').map(n => n.trim()).filter(n => n),
-      quantity: qty,
-      availableQuantity: qty,
-      rate: parseFloat(rate),
-      unit,
-    });
+    setIsSaving(true);
+    try {
+      const qty = parseInt(quantity);
+      
+      await addProduct({
+        invoice_id: invoiceId,
+        name: name.trim(),
+        hs_code: hsCode.trim(),
+        alternate_names: alternateNames.split(',').map(n => n.trim()).filter(n => n),
+        quantity: qty,
+        rate: parseFloat(rate),
+        unit,
+      });
 
-    router.back();
+      router.back();
+    } catch (error) {
+      console.error('Error saving product:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -186,6 +194,8 @@ export default function AddProductScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <SavingOverlay visible={isSaving} message="Saving Product..." />
     </SafeAreaView>
   );
 }

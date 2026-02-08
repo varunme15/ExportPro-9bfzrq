@@ -5,6 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
+import { SavingOverlay } from '../components';
 
 export default function AddBoxScreen() {
   const insets = useSafeAreaInsets();
@@ -23,8 +24,9 @@ export default function AddBoxScreen() {
   const [boxWeight, setBoxWeight] = useState('');
   const [netWeight, setNetWeight] = useState('');
   const [grossWeight, setGrossWeight] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     let boxTypeId = selectedBoxType;
 
     if (isCustom) {
@@ -34,26 +36,29 @@ export default function AddBoxScreen() {
       // Create custom box type
       const newBoxType = {
         name: customName.trim(),
-        length: parseFloat(length),
-        width: parseFloat(width),
-        height: parseFloat(height),
-        weight: parseFloat(boxWeight),
-        isCustom: true,
+        dimensions: `${length}x${width}x${height}`,
+        max_weight: parseFloat(boxWeight),
       };
-      addBoxType(newBoxType);
+      await addBoxType(newBoxType);
       boxTypeId = `bt${Date.now()}`;
     } else if (!selectedBoxType) {
       return;
     }
 
-    addBoxToShipment(shipmentId, {
-      boxTypeId,
-      netWeight: parseFloat(netWeight) || 0,
-      grossWeight: parseFloat(grossWeight) || parseFloat(netWeight) || 0,
-      products: [],
-    });
-
-    router.back();
+    setIsSaving(true);
+    try {
+      await addBoxToShipment(shipmentId, {
+        box_type_id: boxTypeId,
+        weight: parseFloat(grossWeight) || parseFloat(netWeight) || 0,
+        dimensions: isCustom ? `${length}x${width}x${height}` : undefined,
+        products: [],
+      });
+      router.back();
+    } catch (error) {
+      console.error('Error adding box:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const calculateCBM = () => {
@@ -273,6 +278,8 @@ export default function AddBoxScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <SavingOverlay visible={isSaving} message="Adding Box..." />
     </SafeAreaView>
   );
 }

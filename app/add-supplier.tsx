@@ -5,6 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
+import { SavingOverlay } from '../components';
 
 export default function AddSupplierScreen() {
   const insets = useSafeAreaInsets();
@@ -19,6 +20,7 @@ export default function AddSupplierScreen() {
   const [country, setCountry] = useState('');
   const [showWarning, setShowWarning] = useState(false);
   const [similarSupplier, setSimilarSupplier] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const countries = ['China', 'Vietnam', 'Bangladesh', 'India', 'Thailand', 'Indonesia', 'Pakistan', 'Cambodia'];
 
@@ -37,21 +39,26 @@ export default function AddSupplierScreen() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim() || !contactPerson.trim()) {
       return;
     }
 
-    addSupplier({
-      name: name.trim(),
-      contactPerson: contactPerson.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
-      country: country || 'China',
-    });
-
-    router.back();
+    setIsSaving(true);
+    try {
+      await addSupplier({
+        name: name.trim(),
+        contact: contactPerson.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+      });
+      router.back();
+    } catch (error) {
+      console.error('Error saving supplier:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -177,6 +184,8 @@ export default function AddSupplierScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <SavingOverlay visible={isSaving} message="Saving Supplier..." />
     </SafeAreaView>
   );
 }

@@ -370,7 +370,7 @@ export default function ShipmentDetailScreen() {
               <div>
               <View style={styles.documentPreviewCard}>
               <Image 
-                source={{ uri: invoice.image_uri }} 
+                source={{ uri: ${invoice.image_uri} }} 
                 style={styles.documentThumbnail}
                 contentFit="cover"
                 transition={200}

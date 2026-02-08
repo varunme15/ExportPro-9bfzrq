@@ -368,19 +368,7 @@ export default function ShipmentDetailScreen() {
                 </table>
               </div>
               <div>
-              <View style={styles.documentPreviewCard}>
-              <Image 
-                source={{ uri: ${invoice.image_uri} }} 
-                style={styles.documentThumbnail}
-                contentFit="cover"
-                transition={200}
-              />
-              <View style={styles.documentPreviewInfo}>
-                <MaterialIcons name="description" size={20} color={theme.primary} />
-                <Text style={styles.documentPreviewText}>View Original Document</Text>
-                <MaterialIcons name="open-in-new" size={18} color={theme.textMuted} />
-              </View>
-            </View>
+              <img src= ${invoice.image_uri}></img>
               </div>
             `).join('')}
 

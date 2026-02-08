@@ -368,7 +368,7 @@ export default function ShipmentDetailScreen() {
                 </table>
               </div>
               <div>
-              <img src= ${invoice.image_uri}></img>
+              <img width="500" height="600" src= ${invoice.image_uri}></img>
               </div>
             `).join('')}
 

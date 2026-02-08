@@ -53,7 +53,7 @@ export default function AddInvoiceScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { suppliers, addSupplier, addInvoice, addProduct, checkSimilarSupplier, userSettings } = useApp();
+  const { suppliers, addSupplier, addInvoice, addProduct, checkSimilarSupplier, userSettings, invoices } = useApp();
   const supabase = getSupabaseClient();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
 
@@ -421,6 +421,15 @@ export default function AddInvoiceScreen() {
     setShowReviewModal(false);
   };
 
+  // Check for duplicate invoice
+  const checkDuplicateInvoice = (supplierId: string, invoiceNum: string): boolean => {
+    const normalizedNum = invoiceNum.trim().toLowerCase();
+    return invoices.some(inv => 
+      inv.supplier_id === supplierId && 
+      inv.invoice_number.toLowerCase().trim() === normalizedNum
+    );
+  };
+
   const handleSave = async () => {
     if (!selectedSupplier || !invoiceNumber.trim()) {
       Alert.alert('Missing Data', 'Please select a supplier and enter invoice number');
@@ -431,6 +440,25 @@ export default function AddInvoiceScreen() {
       Alert.alert('Error', 'User not authenticated');
       return;
     }
+
+    // Check for duplicate invoice
+    if (checkDuplicateInvoice(selectedSupplier, invoiceNumber)) {
+      Alert.alert(
+        'Duplicate Invoice',
+        `Invoice #${invoiceNumber.trim()} already exists for this supplier. Do you want to add it anyway?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Add Anyway', onPress: () => saveInvoice() }
+        ]
+      );
+      return;
+    }
+
+    await saveInvoice();
+  };
+
+  const saveInvoice = async () => {
+    if (!user?.id) return;
 
     setIsSaving(true);
     try {
@@ -487,6 +515,9 @@ export default function AddInvoiceScreen() {
       setIsSaving(false);
     }
   };
+
+  // Show duplicate warning badge for invoice number
+  const isDuplicateInvoice = selectedSupplier && invoiceNumber.trim() && checkDuplicateInvoice(selectedSupplier, invoiceNumber);
 
   const resetFile = () => {
     setFileUri(null);
@@ -669,12 +700,20 @@ export default function AddInvoiceScreen() {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Invoice Number *</Text>
             <TextInput
-              style={[styles.input, extractedData && styles.inputExtracted]}
+              style={[styles.input, extractedData && styles.inputExtracted, isDuplicateInvoice && styles.inputWarning]}
               placeholder="Enter invoice number"
               placeholderTextColor={theme.textMuted}
               value={invoiceNumber}
               onChangeText={setInvoiceNumber}
             />
+            {isDuplicateInvoice && (
+              <View style={styles.duplicateWarningBox}>
+                <MaterialIcons name="warning" size={16} color={theme.warning} />
+                <Text style={styles.duplicateWarningText}>
+                  This invoice number already exists for the selected supplier
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
@@ -1390,6 +1429,24 @@ const styles = StyleSheet.create({
   inputExtracted: {
     borderWidth: 1,
     borderColor: theme.success,
+  },
+  inputWarning: {
+    borderWidth: 1,
+    borderColor: theme.warning,
+  },
+  duplicateWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${theme.warning}15`,
+    borderRadius: borderRadius.sm,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
+    gap: spacing.xs,
+  },
+  duplicateWarningText: {
+    ...typography.small,
+    color: theme.warning,
+    flex: 1,
   },
   infoNote: {
     flexDirection: 'row',

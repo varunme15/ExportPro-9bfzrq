@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,10 +11,17 @@ import { getCurrencySymbol, formatCurrencyCompact } from '../../constants/config
 export default function InventoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { products, invoices, getSupplierById, userSettings } = useApp();
+  const { products, invoices, getSupplierById, userSettings, refreshData, loading } = useApp();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterHSCode, setFilterHSCode] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshData();
+    setRefreshing(false);
+  };
 
   // Get unique HS codes
   const hsCodes = [...new Set(products.map(p => p.hs_code))].sort();
@@ -37,7 +44,7 @@ export default function InventoryScreen() {
       : 0;
     return sum + (p.available_quantity * avgRate);
   }, 0);
-  const totalItems = products.reduce((sum, p) => sum + p.availableQuantity, 0);
+  const totalItems = products.reduce((sum, p) => sum + (p.available_quantity || 0), 0);
 
   const getProductInvoices = (item: typeof products[0]) => {
     if (!item.invoices || item.invoices.length === 0) {
@@ -65,7 +72,7 @@ export default function InventoryScreen() {
 
   const renderProduct = ({ item }: { item: typeof products[0] }) => {
     const { count, suppliers, avgRate } = getProductInvoices(item);
-    const stockPercentage = (item.availableQuantity / item.quantity) * 100;
+    const stockPercentage = item.quantity > 0 ? (item.available_quantity / item.quantity) * 100 : 0;
     const stockColor = stockPercentage < 30 ? theme.error : stockPercentage < 60 ? theme.warning : theme.success;
 
     return (
@@ -186,6 +193,9 @@ export default function InventoryScreen() {
           estimatedItemSize={170}
           numColumns={2}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: insets.bottom + spacing.xl }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.primary]} />
+          }
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>

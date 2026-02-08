@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,8 +11,15 @@ import { useApp } from '../../contexts/AppContext';
 export default function ShipmentsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { shipments, getBoxTypeById } = useApp();
+  const { shipments, getBoxTypeById, refreshData } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshData();
+    setRefreshing(false);
+  };
 
   const filteredShipments = searchQuery
     ? shipments.filter(s => 
@@ -144,6 +151,9 @@ export default function ShipmentsScreen() {
           renderItem={renderShipment}
           estimatedItemSize={220}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: insets.bottom + spacing.xl }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.primary]} />
+          }
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>

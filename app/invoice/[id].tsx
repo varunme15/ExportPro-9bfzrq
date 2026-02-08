@@ -1,5 +1,7 @@
+
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -23,6 +25,8 @@ export default function InvoiceDetailScreen() {
     deletePayment,
     getPaymentsByInvoice,
     getInvoicePaidAmount,
+    refreshData,
+    loading,
   } = useApp();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
 
@@ -31,6 +35,14 @@ export default function InvoiceDetailScreen() {
   const [paymentNotes, setPaymentNotes] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshData();
+    setRefreshing(false);
+  };
 
   const invoice = invoices.find(i => i.id === id);
   
@@ -255,6 +267,9 @@ export default function InvoiceDetailScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.primary]} />
+        }
       >
         {/* Invoice Info Card */}
         <View style={styles.invoiceCard}>
@@ -288,6 +303,28 @@ export default function InvoiceDetailScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Invoice Document Preview */}
+        {invoice.image_uri && (
+          <Pressable 
+            style={styles.documentPreviewSection}
+            onPress={() => setShowImageModal(true)}
+          >
+            <View style={styles.documentPreviewCard}>
+              <Image 
+                source={{ uri: invoice.image_uri }} 
+                style={styles.documentThumbnail}
+                contentFit="cover"
+                transition={200}
+              />
+              <View style={styles.documentPreviewInfo}>
+                <MaterialIcons name="description" size={20} color={theme.primary} />
+                <Text style={styles.documentPreviewText}>View Original Document</Text>
+                <MaterialIcons name="open-in-new" size={18} color={theme.textMuted} />
+              </View>
+            </View>
+          </Pressable>
+        )}
 
         {/* Payment Progress Section */}
         <View style={styles.section}>
@@ -458,6 +495,31 @@ export default function InvoiceDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Document Image Modal */}
+      <Modal
+        visible={showImageModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <View style={styles.imageModalOverlay}>
+          <Pressable 
+            style={styles.imageModalClose}
+            onPress={() => setShowImageModal(false)}
+          >
+            <MaterialIcons name="close" size={28} color="#FFF" />
+          </Pressable>
+          {invoice?.image_uri && (
+            <Image 
+              source={{ uri: invoice.image_uri }}
+              style={styles.fullScreenImage}
+              contentFit="contain"
+              transition={300}
+            />
+          )}
+        </View>
+      </Modal>
 
       {/* Add Payment Modal */}
       <Modal
@@ -1074,5 +1136,55 @@ const styles = StyleSheet.create({
   modalSubmitText: {
     ...typography.bodyBold,
     color: '#FFF',
+  },
+  // Document Preview Styles
+  documentPreviewSection: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  documentPreviewCard: {
+    backgroundColor: theme.surface,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    ...shadows.card,
+  },
+  documentThumbnail: {
+    width: '100%',
+    height: 150,
+    backgroundColor: theme.backgroundSecondary,
+  },
+  documentPreviewInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  documentPreviewText: {
+    ...typography.body,
+    color: theme.primary,
+    flex: 1,
+  },
+  // Image Modal Styles
+  imageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '80%',
   },
 });

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -10,8 +10,15 @@ import { useApp } from '../../contexts/AppContext';
 export default function SuppliersScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { suppliers, invoices, products, getInvoicesBySupplier } = useApp();
+  const { suppliers, invoices, products, getInvoicesBySupplier, refreshData } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshData();
+    setRefreshing(false);
+  };
 
   const filteredSuppliers = suppliers.filter(s => 
     searchQuery === '' || 
@@ -143,6 +150,9 @@ export default function SuppliersScreen() {
           renderItem={renderSupplier}
           estimatedItemSize={180}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: insets.bottom + spacing.xl }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.primary]} />
+          }
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>

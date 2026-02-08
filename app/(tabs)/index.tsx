@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -10,7 +10,14 @@ import { SHIPMENT_STATUS, getCurrencySymbol, formatCurrencyCompact } from '../..
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { suppliers, invoices, products, shipments, userSettings } = useApp();
+  const { suppliers, invoices, products, shipments, userSettings, refreshData } = useApp();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshData();
+    setRefreshing(false);
+  };
   const currencySymbol = getCurrencySymbol(userSettings.currency);
 
   // Calculate total inventory value using average rate from all invoices
@@ -48,6 +55,9 @@ export default function DashboardScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: insets.bottom + spacing.lg }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.primary]} />
+        }
       >
         {/* Header */}
         <View style={styles.header}>

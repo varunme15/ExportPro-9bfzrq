@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -10,7 +10,7 @@ import { useApp } from '../../contexts/AppContext';
 export default function SuppliersScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { suppliers, invoices, products, getInvoicesBySupplier, refreshData } = useApp();
+  const { suppliers, invoices, products, getInvoicesBySupplier, refreshData, checkSupplierLimit } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -19,6 +19,8 @@ export default function SuppliersScreen() {
     await refreshData();
     setRefreshing(false);
   };
+
+  const supplierCheck = checkSupplierLimit();
 
   const filteredSuppliers = suppliers.filter(s => 
     searchQuery === '' || 
@@ -107,7 +109,13 @@ export default function SuppliersScreen() {
     <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Suppliers</Text>
-        <Pressable style={styles.addBtn} onPress={() => router.push('/add-supplier')}>
+        <Pressable style={[styles.addBtn, !supplierCheck.allowed && { backgroundColor: theme.textMuted }]} onPress={() => {
+          if (!supplierCheck.allowed) {
+            Alert.alert('Supplier Limit', supplierCheck.message || 'Limit reached');
+            return;
+          }
+          router.push('/add-supplier');
+        }}>
           <MaterialIcons name="add" size={24} color="#FFF" />
         </Pressable>
       </View>

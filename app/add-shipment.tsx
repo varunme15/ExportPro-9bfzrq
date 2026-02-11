@@ -5,12 +5,14 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
-import { SavingOverlay } from '../components';
+import { SavingOverlay, UpgradeBanner, LimitReachedModal } from '../components';
 
 export default function AddShipmentScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { addShipment, customers } = useApp();
+  const { addShipment, customers, checkShipmentLimit } = useApp();
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const shipmentCheck = checkShipmentLimit();
 
   const [name, setName] = useState('');
   const [destination, setDestination] = useState('');
@@ -31,6 +33,11 @@ export default function AddShipmentScreen() {
 
   const handleSave = async () => {
     if (!name.trim() || !destination.trim()) {
+      return;
+    }
+
+    if (!shipmentCheck.allowed) {
+      setShowLimitModal(true);
       return;
     }
 
@@ -86,6 +93,15 @@ export default function AddShipmentScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {!shipmentCheck.allowed && (
+            <UpgradeBanner
+              message={shipmentCheck.message || 'Shipment limit reached'}
+              currentCount={shipmentCheck.metadata?.current}
+              limit={shipmentCheck.metadata?.limit}
+              resourceType="shipments this month"
+            />
+          )}
+
           {/* Shipment Info */}
           <Text style={styles.sectionTitle}>SHIPMENT DETAILS</Text>
           
@@ -190,6 +206,14 @@ export default function AddShipmentScreen() {
       </KeyboardAvoidingView>
 
       <SavingOverlay visible={isSaving} message="Creating Shipment..." />
+      <LimitReachedModal
+        visible={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        title="Shipment Limit Reached"
+        message={shipmentCheck.message || ''}
+        currentCount={shipmentCheck.metadata?.current}
+        limit={shipmentCheck.metadata?.limit}
+      />
     </SafeAreaView>
   );
 }

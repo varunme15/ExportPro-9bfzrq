@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,7 +11,7 @@ import { useApp } from '../../contexts/AppContext';
 export default function ShipmentsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { shipments, getBoxTypeById, refreshData } = useApp();
+  const { shipments, getBoxTypeById, refreshData, checkShipmentLimit } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -20,6 +20,8 @@ export default function ShipmentsScreen() {
     await refreshData();
     setRefreshing(false);
   };
+
+  const shipmentCheck = checkShipmentLimit();
 
   const filteredShipments = searchQuery
     ? shipments.filter(s => 
@@ -122,7 +124,13 @@ export default function ShipmentsScreen() {
     <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Shipments</Text>
-        <Pressable style={styles.addBtn} onPress={() => router.push('/add-shipment')}>
+        <Pressable style={[styles.addBtn, !shipmentCheck.allowed && { backgroundColor: theme.textMuted }]} onPress={() => {
+          if (!shipmentCheck.allowed) {
+            Alert.alert('Shipment Limit', shipmentCheck.message || 'Limit reached');
+            return;
+          }
+          router.push('/add-shipment');
+        }}>
           <MaterialIcons name="add" size={24} color="#FFF" />
         </Pressable>
       </View>

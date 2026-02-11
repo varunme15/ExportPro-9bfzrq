@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { getSupabaseClient } from '@/template';
 import { useAuth } from '@/template';
+import { SubscriptionStatus, PlanLimits, getPlanLimits, getCurrentMonthBoundaries, LimitCheckResult } from '../constants/planLimits';
 
 // Types
 export interface Supplier {
@@ -24,6 +25,7 @@ export interface Invoice {
   amount: number;
   payment_status: string;
   image_uri?: string;
+  created_at?: string;
 }
 
 export interface ProductInvoice {
@@ -53,6 +55,10 @@ export interface BoxType {
   name: string;
   dimensions: string;
   max_weight: number;
+  empty_weight?: number;
+  notes?: string;
+  is_active?: boolean;
+  created_at?: string;
 }
 
 export interface Box {
@@ -113,12 +119,21 @@ export interface UserSettings {
   state: string;
   country: string;
   currency: string;
+  subscription_status: SubscriptionStatus;
 }
 
 interface AppContextType {
   // User Settings
   userSettings: UserSettings;
   updateUserSettings: (updates: Partial<UserSettings>) => Promise<void>;
+
+  // Subscription / Plan
+  subscriptionStatus: SubscriptionStatus;
+  planLimits: PlanLimits;
+  checkSupplierLimit: () => LimitCheckResult;
+  checkProductLimit: () => LimitCheckResult;
+  checkShipmentLimit: () => LimitCheckResult;
+  checkInvoiceLimit: () => LimitCheckResult;
 
   // Customers
   customers: Customer[];
@@ -150,7 +165,8 @@ interface AppContextType {
   
   // Box Types
   boxTypes: BoxType[];
-  addBoxType: (boxType: Omit<BoxType, 'id' | 'user_id'>) => Promise<void>;
+  addBoxType: (boxType: Omit<BoxType, 'id' | 'user_id' | 'created_at'>) => Promise<void>;
+  updateBoxType: (id: string, updates: Partial<BoxType>) => Promise<void>;
   deleteBoxType: (id: string) => Promise<void>;
   
   // Shipments
@@ -194,6 +210,7 @@ const defaultUserSettings: UserSettings = {
   state: '',
   country: '',
   currency: 'USD',
+  subscription_status: 'FREE',
 };
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -209,6 +226,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Derived subscription state
+  const subscriptionStatus: SubscriptionStatus = userSettings.subscription_status || 'FREE';
+  const planLimits = getPlanLimits(subscriptionStatus);
+
+  // Plan limit checks
+  const checkSupplierLimit = (): LimitCheckResult => {
+    if (subscriptionStatus === 'PAID') return { allowed: true };
+    const current = suppliers.length;
+    if (current >= planLimits.maxSuppliers) {
+      return {
+        allowed: false,
+        errorCode: 'SUPPLIER_LIMIT_REACHED',
+        message: `Free plan allows up to ${planLimits.maxSuppliers} suppliers. Upgrade to add more.`,
+        metadata: { limit: planLimits.maxSuppliers, current, resourceType: 'suppliers' },
+      };
+    }
+    return { allowed: true };
+  };
+
+  const checkProductLimit = (): LimitCheckResult => {
+    if (subscriptionStatus === 'PAID') return { allowed: true };
+    const current = products.length;
+    if (current >= planLimits.maxProducts) {
+      return {
+        allowed: false,
+        errorCode: 'PRODUCT_LIMIT_REACHED',
+        message: `Free plan allows up to ${planLimits.maxProducts} products. Upgrade to add more.`,
+        metadata: { limit: planLimits.maxProducts, current, resourceType: 'products' },
+      };
+    }
+    return { allowed: true };
+  };
+
+  const checkShipmentLimit = (): LimitCheckResult => {
+    if (subscriptionStatus === 'PAID') return { allowed: true };
+    const { start, end } = getCurrentMonthBoundaries();
+    const thisMonthCount = shipments.filter(s => {
+      const created = s.created_at || '';
+      return created >= start && created <= end;
+    }).length;
+    if (thisMonthCount >= planLimits.maxShipmentsPerMonth) {
+      return {
+        allowed: false,
+        errorCode: 'SHIPMENT_LIMIT_REACHED',
+        message: `Free plan allows up to ${planLimits.maxShipmentsPerMonth} shipments per month. Upgrade for unlimited.`,
+        metadata: { limit: planLimits.maxShipmentsPerMonth, current: thisMonthCount, resourceType: 'shipments this month' },
+      };
+    }
+    return { allowed: true };
+  };
+
+  const checkInvoiceLimit = (): LimitCheckResult => {
+    if (subscriptionStatus === 'PAID') return { allowed: true };
+    const { start, end } = getCurrentMonthBoundaries();
+    const thisMonthCount = invoices.filter(inv => {
+      const created = inv.created_at || '';
+      return created >= start && created <= end;
+    }).length;
+    if (thisMonthCount >= planLimits.maxInvoicesPerMonth) {
+      return {
+        allowed: false,
+        errorCode: 'INVOICE_LIMIT_REACHED',
+        message: `Free plan allows up to ${planLimits.maxInvoicesPerMonth} invoices per month. Upgrade for unlimited.`,
+        metadata: { limit: planLimits.maxInvoicesPerMonth, current: thisMonthCount, resourceType: 'invoices this month' },
+      };
+    }
+    return { allowed: true };
+  };
 
   // Load all data when user changes
   useEffect(() => {
@@ -274,6 +360,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         state: data.state || '',
         country: data.country || '',
         currency: data.currency || 'USD',
+        subscription_status: data.subscription_status || 'FREE',
       });
     } else {
       // Create default settings for new user
@@ -620,7 +707,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Refresh products to get updated data
         await loadProducts();
-        console.log(`Linked existing product "${product.name}" to new invoice`);
         return;
       }
 
@@ -661,7 +747,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       // Refresh products
       await loadProducts();
-      console.log(`Created new product "${product.name}" and linked to invoice`);
     } catch (error) {
       console.error('Error in addProduct:', error);
     }
@@ -711,7 +796,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase
       .from('box_types')
       .select('*')
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Error loading box types:', error);
@@ -721,7 +807,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBoxTypes(data || []);
   };
 
-  const addBoxType = async (boxType: Omit<BoxType, 'id' | 'user_id'>) => {
+  const addBoxType = async (boxType: Omit<BoxType, 'id' | 'user_id' | 'created_at'>) => {
     if (!user?.id) return;
 
     const { data, error } = await supabase
@@ -736,8 +822,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     if (data) {
-      setBoxTypes(prev => [...prev, data]);
+      setBoxTypes(prev => [data, ...prev]);
     }
+  };
+
+  const updateBoxType = async (id: string, updates: Partial<BoxType>) => {
+    const { error } = await supabase
+      .from('box_types')
+      .update(updates)
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating box type:', error);
+      return;
+    }
+
+    setBoxTypes(prev => prev.map(bt => bt.id === id ? { ...bt, ...updates } : bt));
   };
 
   const deleteBoxType = async (id: string) => {
@@ -789,20 +889,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Load box products
     const boxIds = (boxesData || []).map(b => b.id);
-    const { data: boxProductsData, error: boxProductsError } = await supabase
-      .from('box_products')
-      .select('*')
-      .in('box_id', boxIds);
+    let boxProductsData: any[] = [];
+    if (boxIds.length > 0) {
+      const { data: bpData, error: boxProductsError } = await supabase
+        .from('box_products')
+        .select('*')
+        .in('box_id', boxIds);
 
-    if (boxProductsError) {
-      console.error('Error loading box products:', boxProductsError);
-      return;
+      if (boxProductsError) {
+        console.error('Error loading box products:', boxProductsError);
+      } else {
+        boxProductsData = bpData || [];
+      }
     }
 
     // Organize data
     const boxesMap = new Map<string, Box[]>();
     (boxesData || []).forEach(box => {
-      const products = (boxProductsData || [])
+      const products = boxProductsData
         .filter(bp => bp.box_id === box.id)
         .map(bp => ({
           product_id: bp.product_id,
@@ -970,7 +1074,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const oldProductMap = new Map(box.products.map(p => [p.product_id, p.quantity]));
       const newProductMap = new Map(newProducts.map(p => [p.product_id, p.quantity]));
       
-      // Products removed or reduced
       for (const [productId, oldQty] of oldProductMap) {
         const newQty = newProductMap.get(productId) || 0;
         if (newQty < oldQty) {
@@ -978,7 +1081,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       
-      // Products added or increased
       for (const [productId, newQty] of newProductMap) {
         const oldQty = oldProductMap.get(productId) || 0;
         if (newQty > oldQty) {
@@ -987,13 +1089,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Delete old box products
     await supabase
       .from('box_products')
       .delete()
       .eq('box_id', boxId);
 
-    // Insert new box products
     if (newProducts.length > 0) {
       const boxProducts = newProducts.map(p => ({
         box_id: boxId,
@@ -1062,7 +1162,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (data) {
       setPayments(prev => [data, ...prev]);
 
-      // Auto-update invoice payment_status based on total paid
       const invoice = invoices.find(inv => inv.id === payment.invoice_id);
       if (invoice) {
         const totalPaid = getPaymentsByInvoice(payment.invoice_id).reduce((sum, p) => sum + p.amount, 0) + payment.amount;
@@ -1089,7 +1188,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     setPayments(prev => prev.filter(p => p.id !== id));
 
-    // Update invoice payment status after deletion
     if (payment) {
       const invoice = invoices.find(inv => inv.id === payment.invoice_id);
       if (invoice) {
@@ -1120,6 +1218,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       userSettings,
       updateUserSettings,
+      subscriptionStatus,
+      planLimits,
+      checkSupplierLimit,
+      checkProductLimit,
+      checkShipmentLimit,
+      checkInvoiceLimit,
       customers,
       addCustomer,
       updateCustomer,
@@ -1142,6 +1246,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateProductQuantity,
       boxTypes,
       addBoxType,
+      updateBoxType,
       deleteBoxType,
       shipments,
       addShipment,

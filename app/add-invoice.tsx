@@ -12,7 +12,7 @@ import { theme, typography, spacing, shadows, borderRadius } from '../constants/
 import { useApp } from '../contexts/AppContext';
 import { getSupabaseClient, useAuth } from '../template';
 import { getCurrencySymbol } from '../constants/config';
-import { SavingOverlay } from '../components';
+import { SavingOverlay, UpgradeBanner, LimitReachedModal } from '../components';
 import { decode } from 'base64-arraybuffer';
 
 interface ExtractedProduct {
@@ -54,7 +54,7 @@ export default function AddInvoiceScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { suppliers, addSupplier, addInvoice, addProduct, checkSimilarSupplier, userSettings, invoices } = useApp();
+  const { suppliers, addSupplier, addInvoice, addProduct, checkSimilarSupplier, userSettings, invoices, checkInvoiceLimit, subscriptionStatus, planLimits } = useApp();
   const supabase = getSupabaseClient();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
 
@@ -82,6 +82,9 @@ export default function AddInvoiceScreen() {
   const [cropRegion, setCropRegion] = useState<CropRegion | null>(null);
   const maxRetries = 3;
   const [isSaving, setIsSaving] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const invoiceCheck = checkInvoiceLimit();
+  const isFree = subscriptionStatus === 'FREE';
 
   const handleImagePick = async (source: 'camera' | 'library') => {
     try {
@@ -432,6 +435,11 @@ export default function AddInvoiceScreen() {
   };
 
   const handleSave = async () => {
+    if (!invoiceCheck.allowed) {
+      setShowLimitModal(true);
+      return;
+    }
+
     if (!selectedSupplier || !invoiceNumber.trim()) {
       Alert.alert('Missing Data', 'Please select a supplier and enter invoice number');
       return;
@@ -609,37 +617,51 @@ export default function AddInvoiceScreen() {
           showsVerticalScrollIndicator={false}
         >
           {/* OCR Upload Section */}
-          <Text style={styles.sectionTitle}>SCAN INVOICE (OPTIONAL)</Text>
+          {!invoiceCheck.allowed && (
+            <UpgradeBanner
+              message={invoiceCheck.message || 'Invoice limit reached'}
+              currentCount={invoiceCheck.metadata?.current}
+              limit={invoiceCheck.metadata?.limit}
+              resourceType="invoices this month"
+            />
+          )}
+
+          <Text style={styles.sectionTitle}>SCAN INVOICE {isFree ? '(PRO ONLY)' : '(OPTIONAL)'}</Text>
           
           {!fileUri ? (
-            <View style={styles.uploadSection}>
+            <View style={[styles.uploadSection, isFree && { opacity: 0.5 }]}>
               <View style={styles.uploadOptions}>
                 <Pressable 
                   style={styles.uploadBtn}
-                  onPress={() => handleImagePick('camera')}
+                  onPress={() => isFree ? Alert.alert('Pro Feature', 'Invoice scanning is available on the Pro plan. Free plan supports manual entry only.') : handleImagePick('camera')}
                   disabled={isProcessing}
                 >
-                  <MaterialIcons name="camera-alt" size={28} color={theme.primary} />
+                  <MaterialIcons name="camera-alt" size={28} color={isFree ? theme.textMuted : theme.primary} />
                   <Text style={styles.uploadBtnText}>Camera</Text>
+                  {isFree ? <View style={styles.proBadge}><Text style={styles.proBadgeText}>PRO</Text></View> : null}
                 </Pressable>
                 <Pressable 
                   style={styles.uploadBtn}
-                  onPress={() => handleImagePick('library')}
+                  onPress={() => isFree ? Alert.alert('Pro Feature', 'Invoice scanning is available on the Pro plan. Free plan supports manual entry only.') : handleImagePick('library')}
                   disabled={isProcessing}
                 >
-                  <MaterialIcons name="photo-library" size={28} color={theme.primary} />
+                  <MaterialIcons name="photo-library" size={28} color={isFree ? theme.textMuted : theme.primary} />
                   <Text style={styles.uploadBtnText}>Gallery</Text>
+                  {isFree ? <View style={styles.proBadge}><Text style={styles.proBadgeText}>PRO</Text></View> : null}
                 </Pressable>
                 <Pressable 
                   style={styles.uploadBtn}
-                  onPress={handlePdfPick}
+                  onPress={() => isFree ? Alert.alert('Pro Feature', 'Invoice scanning is available on the Pro plan. Free plan supports manual entry only.') : handlePdfPick()}
                   disabled={isProcessing}
                 >
-                  <MaterialIcons name="picture-as-pdf" size={28} color={theme.error} />
+                  <MaterialIcons name="picture-as-pdf" size={28} color={isFree ? theme.textMuted : theme.error} />
                   <Text style={styles.uploadBtnText}>PDF</Text>
+                  {isFree ? <View style={styles.proBadge}><Text style={styles.proBadgeText}>PRO</Text></View> : null}
                 </Pressable>
               </View>
-              <Text style={styles.uploadHint}>Supports images (JPG, PNG) and PDF documents</Text>
+              <Text style={styles.uploadHint}>
+                {isFree ? 'Upgrade to Pro to scan invoices automatically' : 'Supports images (JPG, PNG) and PDF documents'}
+              </Text>
             </View>
           ) : (
             <View style={styles.filePreview}>
@@ -1233,6 +1255,14 @@ export default function AddInvoiceScreen() {
         </SafeAreaView>
       </Modal>
     <SavingOverlay visible={isSaving} message="Saving Invoice..." />
+    <LimitReachedModal
+      visible={showLimitModal}
+      onClose={() => setShowLimitModal(false)}
+      title="Invoice Limit Reached"
+      message={invoiceCheck.message || ''}
+      currentCount={invoiceCheck.metadata?.current}
+      limit={invoiceCheck.metadata?.limit}
+    />
     </SafeAreaView>
   );
 }
@@ -1309,6 +1339,20 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: theme.textMuted,
     textAlign: 'center',
+  },
+  proBadge: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    backgroundColor: theme.warning,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+    borderRadius: borderRadius.sm,
+  },
+  proBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFF',
   },
   filePreview: {
     width: '100%',

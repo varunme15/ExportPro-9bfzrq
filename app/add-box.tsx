@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -15,6 +15,9 @@ export default function AddBoxScreen() {
 
   const shipmentId = params.shipmentId as string;
 
+  // Only show active standard boxes in the dropdown
+  const activeBoxTypes = boxTypes.filter(bt => bt.is_active !== false);
+
   const [selectedBoxType, setSelectedBoxType] = useState('');
   const [isCustom, setIsCustom] = useState(false);
   const [customName, setCustomName] = useState('');
@@ -26,31 +29,51 @@ export default function AddBoxScreen() {
   const [grossWeight, setGrossWeight] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // When a standard box is selected, auto-fill dimension/weight fields
+  const handleSelectBoxType = (btId: string) => {
+    setSelectedBoxType(btId);
+    const bt = boxTypes.find(b => b.id === btId);
+    if (bt) {
+      const dims = bt.dimensions.split('x').map(d => d.trim());
+      setLength(dims[0] || '');
+      setWidth(dims[1] || '');
+      setHeight(dims[2] || '');
+      setBoxWeight(bt.empty_weight ? bt.empty_weight.toString() : '');
+    }
+  };
+
   const handleSave = async () => {
     let boxTypeId = selectedBoxType;
 
     if (isCustom) {
-      if (!customName.trim() || !length || !width || !height || !boxWeight) {
+      if (!customName.trim() || !length || !width || !height) {
+        Alert.alert('Missing Data', 'Please fill in box name and dimensions');
         return;
       }
       // Create custom box type
       const newBoxType = {
         name: customName.trim(),
         dimensions: `${length}x${width}x${height}`,
-        max_weight: parseFloat(boxWeight),
+        max_weight: parseFloat(boxWeight) || 0,
+        empty_weight: parseFloat(boxWeight) || undefined,
+        is_active: true,
       };
       await addBoxType(newBoxType);
+      // Use the latest box type ID (will be refreshed)
       boxTypeId = `bt${Date.now()}`;
     } else if (!selectedBoxType) {
+      Alert.alert('Missing Data', 'Please select a box type');
       return;
     }
 
     setIsSaving(true);
     try {
+      // Store snapshot dimensions on the shipment box
+      const snapshotDims = `${length}x${width}x${height}`;
       await addBoxToShipment(shipmentId, {
         box_type_id: boxTypeId,
         weight: parseFloat(grossWeight) || parseFloat(netWeight) || 0,
-        dimensions: isCustom ? `${length}x${width}x${height}` : undefined,
+        dimensions: snapshotDims,
         products: [],
       });
       router.back();
@@ -62,15 +85,18 @@ export default function AddBoxScreen() {
   };
 
   const calculateCBM = () => {
-    if (isCustom && length && width && height) {
-      return ((parseFloat(length) * parseFloat(width) * parseFloat(height)) / 1000000).toFixed(4);
-    }
-    const boxType = boxTypes.find(bt => bt.id === selectedBoxType);
-    if (boxType) {
-      return ((boxType.length * boxType.width * boxType.height) / 1000000).toFixed(4);
+    if (length && width && height) {
+      const l = parseFloat(length) || 0;
+      const w = parseFloat(width) || 0;
+      const h = parseFloat(height) || 0;
+      return ((l * w * h) / 1000000).toFixed(4);
     }
     return '0.0000';
   };
+
+  const canSave = isCustom
+    ? customName.trim() && length && width && height
+    : selectedBoxType;
 
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
@@ -85,8 +111,9 @@ export default function AddBoxScreen() {
           </Pressable>
           <Text style={styles.headerTitle}>Add Box</Text>
           <Pressable 
-            style={[styles.saveBtn, ((!selectedBoxType && !isCustom) || (isCustom && (!customName.trim() || !length || !width || !height))) && styles.saveBtnDisabled]}
+            style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
             onPress={handleSave}
+            disabled={!canSave}
           >
             <Text style={styles.saveBtnText}>Add</Text>
           </Pressable>
@@ -105,7 +132,7 @@ export default function AddBoxScreen() {
               onPress={() => setIsCustom(false)}
             >
               <Text style={[styles.toggleText, !isCustom && styles.toggleTextActive]}>
-                Standard Sizes
+                Standard Boxes
               </Text>
             </Pressable>
             <Pressable 
@@ -120,53 +147,122 @@ export default function AddBoxScreen() {
 
           {!isCustom ? (
             <>
-              <Text style={styles.sectionTitle}>SELECT BOX TYPE</Text>
-              <View style={styles.boxTypesGrid}>
-                {boxTypes.map(bt => (
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>SELECT STANDARD BOX</Text>
+                <Pressable
+                  style={styles.manageLink}
+                  onPress={() => router.push('/standard-boxes')}
+                >
+                  <MaterialIcons name="settings" size={16} color={theme.primary} />
+                  <Text style={styles.manageLinkText}>Manage</Text>
+                </Pressable>
+              </View>
+
+              {activeBoxTypes.length === 0 ? (
+                <View style={styles.emptyBoxTypes}>
+                  <MaterialIcons name="inbox" size={40} color={theme.textMuted} />
+                  <Text style={styles.emptyText}>No active standard boxes</Text>
                   <Pressable
-                    key={bt.id}
-                    style={[
-                      styles.boxTypeCard,
-                      selectedBoxType === bt.id && styles.boxTypeCardActive
-                    ]}
-                    onPress={() => setSelectedBoxType(bt.id)}
+                    style={styles.emptyAddBtn}
+                    onPress={() => router.push('/standard-boxes')}
                   >
-                    <View style={[
-                      styles.boxTypeIcon,
-                      selectedBoxType === bt.id && styles.boxTypeIconActive
-                    ]}>
-                      <MaterialIcons 
-                        name="inbox" 
-                        size={24} 
-                        color={selectedBoxType === bt.id ? '#FFF' : theme.primary} 
+                    <MaterialIcons name="add" size={18} color="#FFF" />
+                    <Text style={styles.emptyAddBtnText}>Add Box Types</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.boxTypesGrid}>
+                  {activeBoxTypes.map(bt => {
+                    const dims = bt.dimensions.split('x').map(d => d.trim());
+                    return (
+                      <Pressable
+                        key={bt.id}
+                        style={[
+                          styles.boxTypeCard,
+                          selectedBoxType === bt.id && styles.boxTypeCardActive
+                        ]}
+                        onPress={() => handleSelectBoxType(bt.id)}
+                      >
+                        <View style={[
+                          styles.boxTypeIcon,
+                          selectedBoxType === bt.id && styles.boxTypeIconActive
+                        ]}>
+                          <MaterialIcons 
+                            name="inbox" 
+                            size={24} 
+                            color={selectedBoxType === bt.id ? '#FFF' : theme.primary} 
+                          />
+                        </View>
+                        <Text style={[
+                          styles.boxTypeName,
+                          selectedBoxType === bt.id && styles.boxTypeNameActive
+                        ]} numberOfLines={1}>
+                          {bt.name}
+                        </Text>
+                        <Text style={[
+                          styles.boxTypeDimensions,
+                          selectedBoxType === bt.id && styles.boxTypeDimensionsActive
+                        ]}>
+                          {bt.dimensions} cm
+                        </Text>
+                        {bt.max_weight ? (
+                          <Text style={[
+                            styles.boxTypeWeight,
+                            selectedBoxType === bt.id && styles.boxTypeWeightActive
+                          ]}>
+                            Max: {bt.max_weight} kg
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Override section when a standard box is selected */}
+              {selectedBoxType ? (
+                <>
+                  <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>OVERRIDE DIMENSIONS (OPTIONAL)</Text>
+                  <Text style={styles.overrideHint}>
+                    Adjust dimensions for this specific shipment box. The standard values are pre-filled.
+                  </Text>
+                  <View style={styles.row}>
+                    <View style={[styles.inputGroup, { flex: 1 }]}>
+                      <Text style={styles.label}>Length (cm)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0"
+                        placeholderTextColor={theme.textMuted}
+                        value={length}
+                        onChangeText={setLength}
+                        keyboardType="decimal-pad"
                       />
                     </View>
-                    <Text style={[
-                      styles.boxTypeName,
-                      selectedBoxType === bt.id && styles.boxTypeNameActive
-                    ]}>
-                      {bt.name}
-                    </Text>
-                    <Text style={[
-                      styles.boxTypeDimensions,
-                      selectedBoxType === bt.id && styles.boxTypeDimensionsActive
-                    ]}>
-                      {bt.length}×{bt.width}×{bt.height} cm
-                    </Text>
-                    <Text style={[
-                      styles.boxTypeWeight,
-                      selectedBoxType === bt.id && styles.boxTypeWeightActive
-                    ]}>
-                      Box: {bt.weight} kg
-                    </Text>
-                    {bt.isCustom && (
-                      <View style={styles.customBadge}>
-                        <Text style={styles.customBadgeText}>Custom</Text>
-                      </View>
-                    )}
-                  </Pressable>
-                ))}
-              </View>
+                    <View style={[styles.inputGroup, { flex: 1, marginHorizontal: spacing.sm }]}>
+                      <Text style={styles.label}>Width (cm)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0"
+                        placeholderTextColor={theme.textMuted}
+                        value={width}
+                        onChangeText={setWidth}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                    <View style={[styles.inputGroup, { flex: 1 }]}>
+                      <Text style={styles.label}>Height (cm)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0"
+                        placeholderTextColor={theme.textMuted}
+                        value={height}
+                        onChangeText={setHeight}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  </View>
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -220,7 +316,7 @@ export default function AddBoxScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Empty Box Weight (kg) *</Text>
+                <Text style={styles.label}>Empty Box Weight (kg)</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="0.0"
@@ -347,10 +443,52 @@ const styles = StyleSheet.create({
     color: theme.textPrimary,
     fontWeight: '600',
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
   sectionTitle: {
     ...typography.sectionHeader,
     color: theme.textSecondary,
     marginBottom: spacing.md,
+  },
+  manageLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  manageLinkText: {
+    ...typography.caption,
+    color: theme.primary,
+    fontWeight: '600',
+  },
+  emptyBoxTypes: {
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.lg,
+    padding: spacing.xl,
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  emptyText: {
+    ...typography.body,
+    color: theme.textSecondary,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  emptyAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.primary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    gap: spacing.xs,
+  },
+  emptyAddBtnText: {
+    ...typography.bodyBold,
+    color: '#FFF',
   },
   boxTypesGrid: {
     flexDirection: 'row',
@@ -406,19 +544,10 @@ const styles = StyleSheet.create({
   boxTypeWeightActive: {
     color: 'rgba(255,255,255,0.6)',
   },
-  customBadge: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
-    backgroundColor: theme.warning,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  customBadgeText: {
-    ...typography.small,
-    color: '#FFF',
-    fontSize: 9,
+  overrideHint: {
+    ...typography.caption,
+    color: theme.textSecondary,
+    marginBottom: spacing.lg,
   },
   inputGroup: {
     marginBottom: spacing.lg,

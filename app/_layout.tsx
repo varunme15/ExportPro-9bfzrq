@@ -109,6 +109,13 @@ export default function RootLayout() {
             animation: 'slide_from_bottom',
           }} 
         />
+        <Stack.Screen 
+          name="standard-boxes" 
+          options={{ 
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }} 
+        />
       </Stack>
         </AppProvider>
       </AuthProvider>

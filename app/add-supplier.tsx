@@ -5,12 +5,14 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
-import { SavingOverlay } from '../components';
+import { SavingOverlay, UpgradeBanner, LimitReachedModal } from '../components';
 
 export default function AddSupplierScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { addSupplier, checkSimilarSupplier } = useApp();
+  const { addSupplier, checkSimilarSupplier, checkSupplierLimit } = useApp();
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const supplierCheck = checkSupplierLimit();
 
   const [name, setName] = useState('');
   const [contactPerson, setContactPerson] = useState('');
@@ -41,6 +43,11 @@ export default function AddSupplierScreen() {
 
   const handleSave = async () => {
     if (!name.trim() || !contactPerson.trim()) {
+      return;
+    }
+
+    if (!supplierCheck.allowed) {
+      setShowLimitModal(true);
       return;
     }
 
@@ -88,6 +95,15 @@ export default function AddSupplierScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {!supplierCheck.allowed && (
+            <UpgradeBanner
+              message={supplierCheck.message || 'Supplier limit reached'}
+              currentCount={supplierCheck.metadata?.current}
+              limit={supplierCheck.metadata?.limit}
+              resourceType="suppliers"
+            />
+          )}
+
           {/* Company Info */}
           <Text style={styles.sectionTitle}>COMPANY INFORMATION</Text>
           
@@ -186,6 +202,14 @@ export default function AddSupplierScreen() {
       </KeyboardAvoidingView>
 
       <SavingOverlay visible={isSaving} message="Saving Supplier..." />
+      <LimitReachedModal
+        visible={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        title="Supplier Limit Reached"
+        message={supplierCheck.message || ''}
+        currentCount={supplierCheck.metadata?.current}
+        limit={supplierCheck.metadata?.limit}
+      />
     </SafeAreaView>
   );
 }

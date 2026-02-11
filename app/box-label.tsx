@@ -13,7 +13,8 @@ export default function BoxLabelScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { shipmentId, boxId } = useLocalSearchParams();
-  const { userSettings, getBoxById, shipments, getCustomerById, getBoxTypeById } = useApp();
+  const { userSettings, getBoxById, shipments, getCustomerById, getBoxTypeById, subscriptionStatus } = useApp();
+  const isFree = subscriptionStatus === 'FREE';
 
   const shipment = shipments.find(s => s.id === shipmentId);
   const box = getBoxById(shipmentId as string, boxId as string);
@@ -219,15 +220,24 @@ export default function BoxLabelScreen() {
               </View>
             </View>
 
-            {/* QR Code */}
-            <View style={styles.qrSection}>
-              <QRCode
-                value={qrData}
-                size={120}
-                backgroundColor="white"
-              />
-              <Text style={styles.qrText}>Scan for box details</Text>
-            </View>
+            {/* QR Code - only for paid users */}
+            {isFree ? (
+              <View style={styles.qrSection}>
+                <View style={styles.qrLockedBox}>
+                  <MaterialIcons name="lock" size={32} color={theme.textMuted} />
+                  <Text style={styles.qrLockedText}>QR codes available on Pro plan</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.qrSection}>
+                <QRCode
+                  value={qrData}
+                  size={120}
+                  backgroundColor="white"
+                />
+                <Text style={styles.qrText}>Scan for box details</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -396,6 +406,15 @@ const styles = StyleSheet.create({
   qrText: {
     ...typography.small,
     color: theme.textSecondary,
+    marginTop: spacing.sm,
+  },
+  qrLockedBox: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  qrLockedText: {
+    ...typography.caption,
+    color: theme.textMuted,
     marginTop: spacing.sm,
   },
   actionsRow: {

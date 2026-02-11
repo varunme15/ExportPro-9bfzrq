@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,7 +11,7 @@ import { getCurrencySymbol, formatCurrencyCompact } from '../../constants/config
 export default function InventoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { products, invoices, getSupplierById, userSettings, refreshData, loading } = useApp();
+  const { products, invoices, getSupplierById, userSettings, refreshData, loading, checkInvoiceLimit } = useApp();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterHSCode, setFilterHSCode] = useState<string | null>(null);
@@ -22,6 +22,8 @@ export default function InventoryScreen() {
     await refreshData();
     setRefreshing(false);
   };
+
+  const invoiceCheck = checkInvoiceLimit();
 
   // Get unique HS codes
   const hsCodes = [...new Set(products.map(p => p.hs_code))].sort();
@@ -129,7 +131,13 @@ export default function InventoryScreen() {
     <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Inventory</Text>
-        <Pressable style={styles.addBtn} onPress={() => router.push('/add-invoice')}>
+        <Pressable style={[styles.addBtn, !invoiceCheck.allowed && { backgroundColor: theme.textMuted }]} onPress={() => {
+          if (!invoiceCheck.allowed) {
+            Alert.alert('Invoice Limit', invoiceCheck.message || 'Limit reached');
+            return;
+          }
+          router.push('/add-invoice');
+        }}>
           <MaterialIcons name="add" size={24} color="#FFF" />
         </Pressable>
       </View>

@@ -6,13 +6,15 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { theme, typography, spacing, shadows, borderRadius } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
 import { COMMON_HS_CODES } from '../constants/config';
-import { SavingOverlay } from '../components';
+import { SavingOverlay, UpgradeBanner, LimitReachedModal } from '../components';
 
 export default function AddProductScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { addProduct } = useApp();
+  const { addProduct, checkProductLimit } = useApp();
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const productCheck = checkProductLimit();
 
   const invoiceId = params.invoiceId as string;
 
@@ -28,6 +30,11 @@ export default function AddProductScreen() {
 
   const handleSave = async () => {
     if (!name.trim() || !hsCode.trim() || !quantity || !rate) {
+      return;
+    }
+
+    if (!productCheck.allowed) {
+      setShowLimitModal(true);
       return;
     }
 
@@ -80,6 +87,15 @@ export default function AddProductScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {!productCheck.allowed && (
+            <UpgradeBanner
+              message={productCheck.message || 'Product limit reached'}
+              currentCount={productCheck.metadata?.current}
+              limit={productCheck.metadata?.limit}
+              resourceType="products"
+            />
+          )}
+
           {/* Product Info */}
           <Text style={styles.sectionTitle}>PRODUCT INFORMATION</Text>
           
@@ -196,6 +212,14 @@ export default function AddProductScreen() {
       </KeyboardAvoidingView>
 
       <SavingOverlay visible={isSaving} message="Saving Product..." />
+      <LimitReachedModal
+        visible={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        title="Product Limit Reached"
+        message={productCheck.message || ''}
+        currentCount={productCheck.metadata?.current}
+        limit={productCheck.metadata?.limit}
+      />
     </SafeAreaView>
   );
 }

@@ -2,17 +2,20 @@ import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../../template';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
 import { CURRENCIES, COUNTRIES } from '../../constants/config';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { userSettings, updateUserSettings } = useApp();
+  const router = useRouter();
+  const { logout } = useAuth();
+  const { userSettings, updateUserSettings, subscriptionStatus, planLimits, suppliers, products, shipments, invoices } = useApp();
 
   const [name, setName] = useState(userSettings.name);
   const [email, setEmail] = useState(userSettings.email);
-  const [phone, setPhone] = useState(userSettings.phone);
   const [address, setAddress] = useState(userSettings.address);
   const [city, setCity] = useState(userSettings.city);
   const [state, setState] = useState(userSettings.state);
@@ -25,7 +28,6 @@ export default function SettingsScreen() {
     switch (field) {
       case 'name': setName(value); break;
       case 'email': setEmail(value); break;
-      case 'phone': setPhone(value); break;
       case 'address': setAddress(value); break;
       case 'city': setCity(value); break;
       case 'state': setState(value); break;
@@ -35,9 +37,11 @@ export default function SettingsScreen() {
   };
 
   const handleSave = () => {
-    updateUserSettings({ name, email, phone, address, city, state, country, currency });
+    updateUserSettings({ name, email, address, city, state, country, currency });
     setHasChanges(false);
   };
+
+  const isFree = subscriptionStatus === 'FREE';
 
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
@@ -60,7 +64,56 @@ export default function SettingsScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.sectionTitle}>COMPANY INFORMATION</Text>
+          {/* Subscription Status Card */}
+          <View style={[styles.subscriptionCard, isFree ? styles.subscriptionFree : styles.subscriptionPaid]}>
+            <View style={styles.subscriptionHeader}>
+              <MaterialIcons name={isFree ? 'star-border' : 'star'} size={24} color={isFree ? theme.warning : '#FFF'} />
+              <Text style={[styles.subscriptionTitle, isFree ? styles.subscriptionTitleFree : styles.subscriptionTitlePaid]}>
+                {isFree ? 'Free Plan' : 'Pro Plan'}
+              </Text>
+            </View>
+            {isFree ? (
+              <View style={styles.limitsGrid}>
+                <View style={styles.limitItem}>
+                  <Text style={styles.limitValue}>{suppliers.length}/{planLimits.maxSuppliers}</Text>
+                  <Text style={styles.limitLabel}>Suppliers</Text>
+                </View>
+                <View style={styles.limitItem}>
+                  <Text style={styles.limitValue}>{products.length}/{planLimits.maxProducts}</Text>
+                  <Text style={styles.limitLabel}>Products</Text>
+                </View>
+                <View style={styles.limitItem}>
+                  <Text style={styles.limitValue}>
+                    {planLimits.maxInvoicesPerMonth}/mo
+                  </Text>
+                  <Text style={styles.limitLabel}>Invoices</Text>
+                </View>
+                <View style={styles.limitItem}>
+                  <Text style={styles.limitValue}>
+                    {planLimits.maxShipmentsPerMonth}/mo
+                  </Text>
+                  <Text style={styles.limitLabel}>Shipments</Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.paidDesc}>Unlimited resources and all features unlocked.</Text>
+            )}
+          </View>
+
+          {/* Quick Links */}
+          <Text style={styles.sectionTitle}>TOOLS</Text>
+          <Pressable style={styles.linkCard} onPress={() => router.push('/standard-boxes')}>
+            <View style={[styles.linkIcon, { backgroundColor: `${theme.primary}15` }]}>
+              <MaterialIcons name="inbox" size={20} color={theme.primary} />
+            </View>
+            <View style={styles.linkInfo}>
+              <Text style={styles.linkTitle}>Standard Boxes</Text>
+              <Text style={styles.linkDesc}>Manage reusable box type definitions</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
+
+          <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>COMPANY INFORMATION</Text>
           
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Company Name</Text>
@@ -83,18 +136,6 @@ export default function SettingsScreen() {
               onChangeText={val => handleChange('email', val)}
               keyboardType="email-address"
               autoCapitalize="none"
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Phone</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="+1 000 000 0000"
-              placeholderTextColor={theme.textMuted}
-              value={phone}
-              onChangeText={val => handleChange('phone', val)}
-              keyboardType="phone-pad"
             />
           </View>
 
@@ -174,6 +215,12 @@ export default function SettingsScreen() {
               <Text style={styles.saveFullBtnText}>Save Settings</Text>
             </Pressable>
           )}
+
+          {/* Logout */}
+          <Pressable style={styles.logoutBtn} onPress={() => logout()}>
+            <MaterialIcons name="logout" size={20} color={theme.error} />
+            <Text style={styles.logoutBtnText}>Log Out</Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -208,6 +255,89 @@ const styles = StyleSheet.create({
   saveBtnText: {
     ...typography.bodyBold,
     color: '#FFF',
+  },
+  // Subscription card
+  subscriptionCard: {
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  subscriptionFree: {
+    backgroundColor: `${theme.warning}15`,
+    borderWidth: 1,
+    borderColor: `${theme.warning}30`,
+  },
+  subscriptionPaid: {
+    backgroundColor: theme.primary,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  subscriptionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  subscriptionTitleFree: {
+    color: theme.textPrimary,
+  },
+  subscriptionTitlePaid: {
+    color: '#FFF',
+  },
+  limitsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  limitItem: {
+    width: '46%',
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    borderRadius: borderRadius.sm,
+    padding: spacing.sm,
+    alignItems: 'center',
+  },
+  limitValue: {
+    ...typography.bodyBold,
+    color: theme.textPrimary,
+  },
+  limitLabel: {
+    ...typography.small,
+    color: theme.textSecondary,
+  },
+  paidDesc: {
+    ...typography.body,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  // Link cards
+  linkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...shadows.card,
+  },
+  linkIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  linkInfo: {
+    flex: 1,
+  },
+  linkTitle: {
+    ...typography.bodyBold,
+    color: theme.textPrimary,
+  },
+  linkDesc: {
+    ...typography.caption,
+    color: theme.textSecondary,
   },
   sectionTitle: {
     ...typography.sectionHeader,
@@ -296,5 +426,21 @@ const styles = StyleSheet.create({
   saveFullBtnText: {
     ...typography.bodyBold,
     color: '#FFF',
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: `${theme.error}10`,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.lg,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: `${theme.error}30`,
+  },
+  logoutBtnText: {
+    ...typography.bodyBold,
+    color: theme.error,
   },
 });

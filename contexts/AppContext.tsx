@@ -380,20 +380,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!user?.id) return;
 
     const newSettings = { ...userSettings, ...updates };
+    const oldSettings = { ...userSettings };
     setUserSettings(newSettings);
+
+    // Only send editable fields to the database (exclude subscription_status)
+    const { subscription_status, ...editableFields } = newSettings;
 
     const { error } = await supabase
       .from('user_settings')
-      .upsert({
-        user_id: user.id,
-        ...newSettings,
+      .update({
+        ...editableFields,
         updated_at: new Date().toISOString(),
-      });
+      })
+      .eq('user_id', user.id);
 
     if (error) {
       console.error('Error updating user settings:', error);
       // Revert on error
-      setUserSettings(userSettings);
+      setUserSettings(oldSettings);
     }
   };
 

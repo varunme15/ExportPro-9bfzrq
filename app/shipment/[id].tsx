@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -10,6 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
 import { getCurrencySymbol } from '../../constants/config';
+import ShipmentDocumentsSection from '../../components/feature/ShipmentDocuments';
 
 export default function ShipmentDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -17,6 +18,14 @@ export default function ShipmentDetailScreen() {
   const { id } = useLocalSearchParams();
   const { shipments, products, invoices, deleteShipment, removeBoxFromShipment, getBoxTypeById, getProductById, getCustomerById, getSupplierById, userSettings } = useApp();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
+  const [refreshing, setRefreshing] = useState(false);
+  const { refreshData } = useApp();
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshData();
+    setRefreshing(false);
+  };
 
   const shipment = shipments.find(s => s.id === id);
   const customer = shipment?.customer_id ? getCustomerById(shipment.customer_id) : null;
@@ -583,6 +592,9 @@ export default function ShipmentDetailScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+        }
       >
         {/* Shipment Info Card */}
         <View style={styles.infoCard}>
@@ -809,9 +821,17 @@ export default function ShipmentDetailScreen() {
           </View>
         )}
 
-        {/* Documents Section */}
+        {/* Shipment Files Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>DOCUMENTS</Text>
+          <ShipmentDocumentsSection
+            shipmentId={shipment.id}
+            customerId={shipment.customer_id || undefined}
+          />
+        </View>
+
+        {/* Generate Documents Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>GENERATE DOCUMENTS</Text>
           <View style={styles.documentsRow}>
             <Pressable 
               style={styles.documentBtn}

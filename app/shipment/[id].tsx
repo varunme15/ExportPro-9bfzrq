@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, RefreshControl, Modal, TextInput } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -16,9 +16,11 @@ export default function ShipmentDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams();
-  const { shipments, products, invoices, deleteShipment, removeBoxFromShipment, getBoxTypeById, getProductById, getCustomerById, getSupplierById, userSettings } = useApp();
+  const { shipments, products, invoices, deleteShipment, removeBoxFromShipment, getBoxTypeById, getProductById, getCustomerById, getSupplierById, userSettings, updateShipment } = useApp();
   const currencySymbol = getCurrencySymbol(userSettings.currency);
   const [refreshing, setRefreshing] = useState(false);
+  const [editingDeliveryDate, setEditingDeliveryDate] = useState(false);
+  const [deliveryDateInput, setDeliveryDateInput] = useState('');
   const { refreshData } = useApp();
 
   const onRefresh = async () => {
@@ -621,6 +623,20 @@ export default function ShipmentDetailScreen() {
                   <MaterialIcons name="chevron-right" size={16} color={theme.textMuted} />
                 </Pressable>
               )}
+              {/* Delivery Date */}
+              <Pressable
+                style={styles.deliveryDateRow}
+                onPress={() => {
+                  setDeliveryDateInput(shipment.delivery_date || '');
+                  setEditingDeliveryDate(true);
+                }}
+              >
+                <MaterialIcons name="event" size={16} color={shipment.delivery_date ? theme.success : theme.textMuted} />
+                <Text style={[styles.deliveryDateText, !shipment.delivery_date && { color: theme.textMuted }]}>
+                  {shipment.delivery_date ? `Delivery: ${shipment.delivery_date}` : 'Add delivery date'}
+                </Text>
+                <MaterialIcons name="edit" size={14} color={theme.textMuted} />
+              </Pressable>
             </View>
             <View style={[styles.statusBadge, { backgroundColor: `${statusColor}15` }]}>
               <Text style={[styles.statusText, { color: statusColor }]}>
@@ -868,6 +884,54 @@ export default function ShipmentDetailScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Delivery Date Edit Modal */}
+      {editingDeliveryDate ? (
+        <Modal visible animationType="fade" transparent>
+          <View style={styles.dateModalOverlay}>
+            <View style={styles.dateModalContent}>
+              <Text style={styles.dateModalTitle}>Delivery Date</Text>
+              <TextInput
+                style={styles.dateModalInput}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={theme.textMuted}
+                value={deliveryDateInput}
+                onChangeText={setDeliveryDateInput}
+                autoFocus
+              />
+              <View style={styles.dateModalActions}>
+                {shipment.delivery_date ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.dateModalClearBtn, pressed && { opacity: 0.7 }]}
+                    onPress={async () => {
+                      await updateShipment(shipment.id, { delivery_date: '' } as any);
+                      setEditingDeliveryDate(false);
+                    }}
+                  >
+                    <Text style={styles.dateModalClearText}>Clear</Text>
+                  </Pressable>
+                ) : null}
+                <View style={{ flex: 1 }} />
+                <Pressable
+                  style={({ pressed }) => [styles.dateModalCancelBtn, pressed && { opacity: 0.7 }]}
+                  onPress={() => setEditingDeliveryDate(false)}
+                >
+                  <Text style={styles.dateModalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.dateModalSaveBtn, pressed && { opacity: 0.8 }]}
+                  onPress={async () => {
+                    await updateShipment(shipment.id, { delivery_date: deliveryDateInput.trim() || undefined } as any);
+                    setEditingDeliveryDate(false);
+                  }}
+                >
+                  <Text style={styles.dateModalSaveText}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1263,5 +1327,82 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: theme.primary,
     fontWeight: '600',
+  },
+  deliveryDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  deliveryDateText: {
+    ...typography.caption,
+    color: theme.success,
+    fontWeight: '600',
+    flex: 1,
+  },
+  dateModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  dateModalContent: {
+    backgroundColor: theme.background,
+    borderRadius: borderRadius.lg,
+    padding: spacing.xl,
+    width: '100%',
+    maxWidth: 400,
+    ...shadows.cardElevated,
+  },
+  dateModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.textPrimary,
+    marginBottom: spacing.lg,
+  },
+  dateModalInput: {
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    ...typography.body,
+    color: theme.textPrimary,
+    borderWidth: 1,
+    borderColor: theme.border,
+    marginBottom: spacing.lg,
+  },
+  dateModalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dateModalClearBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  dateModalClearText: {
+    ...typography.caption,
+    color: theme.error,
+    fontWeight: '600',
+  },
+  dateModalCancelBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  dateModalCancelText: {
+    ...typography.bodyBold,
+    color: theme.textSecondary,
+  },
+  dateModalSaveBtn: {
+    backgroundColor: theme.primary,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  dateModalSaveText: {
+    ...typography.bodyBold,
+    color: '#FFF',
   },
 });

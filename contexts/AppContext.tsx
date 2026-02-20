@@ -84,6 +84,7 @@ export interface Shipment {
   name: string;
   lot_number?: string;
   destination: string;
+  delivery_date?: string;
   created_at?: string;
   boxes: Box[];
 }

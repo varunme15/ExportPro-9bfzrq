@@ -18,6 +18,7 @@ export default function AddShipmentScreen() {
   const [destination, setDestination] = useState('');
   const [customerId, setCustomerId] = useState<string>('');
   const [lotNumber, setLotNumber] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const popularDestinations = [
@@ -48,6 +49,7 @@ export default function AddShipmentScreen() {
         destination: destination.trim(),
         customer_id: customerId || undefined,
         lot_number: lotNumber.trim() || undefined,
+        delivery_date: deliveryDate.trim() || undefined,
       });
       router.back();
     } catch (error) {
@@ -124,6 +126,17 @@ export default function AddShipmentScreen() {
               placeholderTextColor={theme.textMuted}
               value={lotNumber}
               onChangeText={setLotNumber}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Delivery Date</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="YYYY-MM-DD (optional)"
+              placeholderTextColor={theme.textMuted}
+              value={deliveryDate}
+              onChangeText={setDeliveryDate}
             />
           </View>
 

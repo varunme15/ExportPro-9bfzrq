@@ -5,7 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
-import { useApp } from '../../contexts/AppContext';
+import { useApp, SHIPMENT_STATUSES, ShipmentStatus } from '../../contexts/AppContext';
 
 
 export default function ShipmentsScreen() {
@@ -14,6 +14,7 @@ export default function ShipmentsScreen() {
   const { shipments, getBoxTypeById, refreshData, checkShipmentLimit } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<ShipmentStatus | 'ALL'>('ALL');
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -23,23 +24,16 @@ export default function ShipmentsScreen() {
 
   const shipmentCheck = checkShipmentLimit();
 
-  const filteredShipments = searchQuery
-    ? shipments.filter(s => 
-        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.destination.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : shipments;
+  const filteredShipments = shipments.filter(s => {
+    const matchSearch = !searchQuery ||
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.destination.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchStatus = statusFilter === 'ALL' || s.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
 
-  const getShipmentStatusText = (shipment: typeof shipments[0]) => {
-    const boxCount = shipment.boxes?.length || 0;
-    if (boxCount === 0) return 'Draft';
-    return `${boxCount} Box${boxCount !== 1 ? 'es' : ''}`;
-  };
-
-  const getShipmentStatusColor = (shipment: typeof shipments[0]) => {
-    const boxCount = shipment.boxes?.length || 0;
-    if (boxCount === 0) return theme.textSecondary;
-    return theme.success;
+  const getStatusConfig = (status: ShipmentStatus) => {
+    return SHIPMENT_STATUSES.find(s => s.value === status) || SHIPMENT_STATUSES[0];
   };
 
   const calculateShipmentStats = (shipment: typeof shipments[0]) => {
@@ -67,8 +61,9 @@ export default function ShipmentsScreen() {
 
   const renderShipment = ({ item }: { item: typeof shipments[0] }) => {
     const stats = calculateShipmentStats(item);
-    const statusText = getShipmentStatusText(item);
-    const statusColor = getShipmentStatusColor(item);
+    const statusConfig = getStatusConfig(item.status || 'DRAFT');
+    const statusColor = statusConfig.color;
+    const statusText = statusConfig.label;
     const createdDate = item.created_at ? new Date(item.created_at).toLocaleDateString() : '';
 
     return (
@@ -134,6 +129,30 @@ export default function ShipmentsScreen() {
           <MaterialIcons name="add" size={24} color="#FFF" />
         </Pressable>
       </View>
+
+      {/* Status Filters */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+      >
+        <Pressable
+          style={[styles.filterChip, statusFilter === 'ALL' && styles.filterChipActive]}
+          onPress={() => setStatusFilter('ALL')}
+        >
+          <Text style={[styles.filterChipText, statusFilter === 'ALL' && styles.filterChipTextActive]}>All</Text>
+        </Pressable>
+        {SHIPMENT_STATUSES.map(s => (
+          <Pressable
+            key={s.value}
+            style={[styles.filterChip, statusFilter === s.value && { backgroundColor: s.color }]}
+            onPress={() => setStatusFilter(s.value)}
+          >
+            <MaterialIcons name={s.icon as any} size={14} color={statusFilter === s.value ? '#FFF' : s.color} />
+            <Text style={[styles.filterChipText, statusFilter === s.value && styles.filterChipTextActive]}>{s.label}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
 
       {/* Search */}
       <View style={styles.searchContainer}>
@@ -327,6 +346,32 @@ const styles = StyleSheet.create({
   },
   emptyBtnText: {
     ...typography.bodyBold,
+    color: '#FFF',
+  },
+  filterRow: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    backgroundColor: theme.surface,
+    gap: spacing.xs,
+    ...shadows.card,
+  },
+  filterChipActive: {
+    backgroundColor: theme.primary,
+  },
+  filterChipText: {
+    ...typography.small,
+    color: theme.textSecondary,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
     color: '#FFF',
   },
 });

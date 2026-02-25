@@ -50,6 +50,7 @@ export default function AddShipmentScreen() {
         customer_id: customerId || undefined,
         lot_number: lotNumber.trim() || undefined,
         delivery_date: deliveryDate.trim() || undefined,
+        status: 'DRAFT',
       });
       router.back();
     } catch (error) {

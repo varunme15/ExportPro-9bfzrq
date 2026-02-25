@@ -77,6 +77,15 @@ export interface BoxProduct {
   quantity: number;
 }
 
+export type ShipmentStatus = 'DRAFT' | 'PACKED' | 'IN_TRANSIT' | 'DELIVERED';
+
+export const SHIPMENT_STATUSES: { value: ShipmentStatus; label: string; icon: string; color: string }[] = [
+  { value: 'DRAFT', label: 'Draft', icon: 'edit', color: '#9CA3AF' },
+  { value: 'PACKED', label: 'Packed', icon: 'inventory-2', color: '#3B82F6' },
+  { value: 'IN_TRANSIT', label: 'In Transit', icon: 'local-shipping', color: '#F59E0B' },
+  { value: 'DELIVERED', label: 'Delivered', icon: 'check-circle', color: '#10B981' },
+];
+
 export interface Shipment {
   id: string;
   user_id?: string;
@@ -85,6 +94,7 @@ export interface Shipment {
   lot_number?: string;
   destination: string;
   delivery_date?: string;
+  status: ShipmentStatus;
   created_at?: string;
   boxes: Box[];
 }

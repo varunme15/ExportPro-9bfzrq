@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Alert, RefreshControl, Modal, TextInput } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +9,7 @@ import { shareAsync } from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system';
 import { theme, typography, spacing, shadows, borderRadius } from '../../constants/theme';
-import { useApp } from '../../contexts/AppContext';
+import { useApp, SHIPMENT_STATUSES, ShipmentStatus } from '../../contexts/AppContext';
 import { getCurrencySymbol } from '../../constants/config';
 import ShipmentDocumentsSection from '../../components/feature/ShipmentDocuments';
 
@@ -40,16 +41,12 @@ export default function ShipmentDetailScreen() {
     );
   }
 
-  const getShipmentStatusText = () => {
-    const boxCount = shipment.boxes?.length || 0;
-    if (boxCount === 0) return 'Draft';
-    return `${boxCount} Box${boxCount !== 1 ? 'es' : ''}`;
-  };
+  const currentStatus = (shipment.status || 'DRAFT') as ShipmentStatus;
+  const currentStatusIndex = SHIPMENT_STATUSES.findIndex(s => s.value === currentStatus);
+  const currentStatusConfig = SHIPMENT_STATUSES[currentStatusIndex] || SHIPMENT_STATUSES[0];
 
-  const getShipmentStatusColor = () => {
-    const boxCount = shipment.boxes?.length || 0;
-    if (boxCount === 0) return theme.textSecondary;
-    return theme.success;
+  const handleStatusChange = async (newStatus: ShipmentStatus) => {
+    await updateShipment(shipment.id, { status: newStatus } as any);
   };
 
   const calculateStats = () => {
@@ -574,9 +571,6 @@ export default function ShipmentDetailScreen() {
     );
   };
 
-  const statusText = getShipmentStatusText();
-  const statusColor = getShipmentStatusColor();
-
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
       {/* Header */}
@@ -638,11 +632,58 @@ export default function ShipmentDetailScreen() {
                 <MaterialIcons name="edit" size={14} color={theme.textMuted} />
               </Pressable>
             </View>
-            <View style={[styles.statusBadge, { backgroundColor: `${statusColor}15` }]}>
-              <Text style={[styles.statusText, { color: statusColor }]}>
-                {statusText.toUpperCase()}
+            <View style={[styles.statusBadge, { backgroundColor: `${currentStatusConfig.color}15` }]}>
+              <MaterialIcons name={currentStatusConfig.icon as any} size={14} color={currentStatusConfig.color} />
+              <Text style={[styles.statusText, { color: currentStatusConfig.color }]}>
+                {currentStatusConfig.label.toUpperCase()}
               </Text>
             </View>
+          </View>
+        </View>
+
+        {/* Status Timeline */}
+        <View style={styles.timelineCard}>
+          <Text style={styles.timelineSectionTitle}>SHIPMENT STATUS</Text>
+          <View style={styles.timeline}>
+            {SHIPMENT_STATUSES.map((s, idx) => {
+              const isActive = idx <= currentStatusIndex;
+              const isCurrent = idx === currentStatusIndex;
+              const isLast = idx === SHIPMENT_STATUSES.length - 1;
+              return (
+                <Pressable
+                  key={s.value}
+                  style={styles.timelineStep}
+                  onPress={() => handleStatusChange(s.value)}
+                >
+                  <View style={styles.timelineNodeCol}>
+                    <View style={[
+                      styles.timelineNode,
+                      isActive && { backgroundColor: s.color, borderColor: s.color },
+                      isCurrent && styles.timelineNodeCurrent,
+                    ]}>
+                      <MaterialIcons
+                        name={s.icon as any}
+                        size={isCurrent ? 18 : 14}
+                        color={isActive ? '#FFF' : theme.textMuted}
+                      />
+                    </View>
+                    {!isLast ? (
+                      <View style={[
+                        styles.timelineLine,
+                        isActive && idx < currentStatusIndex && { backgroundColor: SHIPMENT_STATUSES[idx + 1].color },
+                      ]} />
+                    ) : null}
+                  </View>
+                  <View style={styles.timelineLabelWrap}>
+                    <Text style={[
+                      styles.timelineLabel,
+                      isActive && { color: theme.textPrimary, fontWeight: '600' },
+                      isCurrent && { color: s.color, fontWeight: '700' },
+                    ]}>{s.label}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -1020,13 +1061,78 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
+    gap: spacing.xs,
   },
   statusText: {
     ...typography.small,
     fontWeight: '600',
+  },
+  // Timeline
+  timelineCard: {
+    backgroundColor: theme.surface,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    ...shadows.card,
+  },
+  timelineSectionTitle: {
+    ...typography.sectionHeader,
+    color: theme.textSecondary,
+    marginBottom: spacing.lg,
+  },
+  timeline: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  timelineStep: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  timelineNodeCol: {
+    alignItems: 'center',
+    width: '100%',
+    position: 'relative',
+  },
+  timelineNode: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.backgroundSecondary,
+    borderWidth: 2,
+    borderColor: theme.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  timelineNodeCurrent: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 3,
+  },
+  timelineLine: {
+    position: 'absolute',
+    top: 17,
+    left: '50%',
+    right: '-50%',
+    height: 3,
+    backgroundColor: theme.border,
+    zIndex: 0,
+  },
+  timelineLabelWrap: {
+    marginTop: spacing.sm,
+    alignItems: 'center',
+  },
+  timelineLabel: {
+    ...typography.small,
+    color: theme.textMuted,
+    textAlign: 'center',
   },
   statsGrid: {
     flexDirection: 'row',
